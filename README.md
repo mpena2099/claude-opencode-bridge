@@ -174,3 +174,7 @@ This repository must not contain:
 - personal Claude Code config files
 - `.env` files
 - conversation history
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

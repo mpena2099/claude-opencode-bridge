@@ -13,3 +13,4 @@ Validated behavior:
 Installed paths:
 - ~/.claude/skills/delegate-to-opencode/SKILL.md
 - ~/.local/bin/claude-opencode-worker
+LICENSE
