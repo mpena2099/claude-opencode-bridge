@@ -37,12 +37,23 @@ When delegation is appropriate:
 
 1. Preserve all relevant requirements from the user's request.
 2. Give OpenCode enough context to perform the implementation independently.
-3. Run:
+3. Run the worker from the project directory, passing the task on stdin through
+   a quoted heredoc so `$`, backticks and quotes in the task are not expanded:
 
-   `~/.local/bin/claude-opencode-worker "<task>"`
+   ```bash
+   ~/.local/bin/claude-opencode-worker <<'TASK'
+   <task>
+   TASK
+   ```
+
+   Set the Bash tool timeout to 600000 ms. The worker stops OpenCode on its
+   own after 570 s (exit code 124) so it is never killed silently.
 
 4. Wait for OpenCode to finish.
 5. Treat OpenCode's output as an implementation attempt, not as final approval.
+   Exit code 0 does not mean success: OpenCode auto-rejects permission prompts
+   (`permission requested: ...; auto-rejecting`) and still exits 0. Exit code
+   124 means it timed out and the changes may be partial.
 6. Inspect the resulting git diff yourself as the main Claude Code session.
 7. Run the relevant tests, checks, linters, or other validation yourself when appropriate.
 8. Review the implementation against the original requirements, including scope,
@@ -54,6 +65,9 @@ The review in steps 6-8 should be performed by the main Claude Code session
 OpenCode.
 
 Do not blindly trust OpenCode's conclusions or its statement that tests pass.
+
+Do not ask OpenCode to commit, push, reset, clean, checkout, switch, restore,
+stash, rebase or merge. The worker denies those git commands.
 
 Do not commit changes unless the user explicitly requested a commit.
 

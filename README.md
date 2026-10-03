@@ -46,10 +46,12 @@ For the validated setup, OpenCode reported version `1.18.34` and used `muse-spar
 ## Files
 
 - `skills/delegate-to-opencode/SKILL.md`: Claude Code skill definition, including the Opus-only delegation rule and mandatory main-session review.
-- `bin/claude-opencode-worker`: wrapper that launches OpenCode.
+- `bin/claude-opencode-worker`: wrapper that launches OpenCode with a timeout and git guardrails.
 - `install.sh`: installs the skill and wrapper into the expected user directories.
 - `uninstall.sh`: removes the installed files while creating a timestamped backup first.
-- `tests/test-install.sh`: verifies the installed files and basic metadata.
+- `tests/test-install.sh`: verifies the installed files match the repository and checks basic metadata.
+- `tests/test-worker.sh`: exercises the worker against a stub `opencode`, without calling any model.
+- `.github/workflows/ci.yml`: runs ShellCheck, the worker tests and an install/uninstall cycle in a temporary `HOME`.
 - `VERSION`: project/configuration version.
 
 ## Installation
@@ -83,6 +85,21 @@ export OPENCODE_WORKER_MODEL='provider/model'
 
 Then run Claude Code normally.
 
+The worker stops OpenCode after 570 seconds and exits with code 124, staying below the 600-second maximum of Claude Code's Bash tool. Override it with:
+
+```bash
+export OPENCODE_WORKER_TIMEOUT=300
+```
+
+## Tests
+
+```bash
+./tests/test-worker.sh    # worker behavior, no OpenCode or model needed
+./tests/test-install.sh   # installed files match this repository
+```
+
+CI runs both, plus ShellCheck and an install/uninstall cycle in a temporary `HOME`.
+
 ## Manual verification
 
 ### Verify the worker directly
@@ -90,8 +107,12 @@ Then run Claude Code normally.
 From a project directory:
 
 ```bash
-claude-opencode-worker 'Create a file named opencode-delegation-test.txt containing exactly two lines: DELEGATION_TEST and Executed by an external worker.'
+claude-opencode-worker <<'TASK'
+Create a file named opencode-delegation-test.txt containing exactly two lines: DELEGATION_TEST and Executed by an external worker.
+TASK
 ```
+
+The task can also be passed as arguments, but stdin through a quoted heredoc keeps `$`, backticks and quotes literal. The skill tells Claude to use the heredoc form.
 
 ### Verify automatic delegation with Opus
 
@@ -136,7 +157,20 @@ The skill tells Claude not to delegate:
 - difficult debugging that needs substantial reasoning
 - work where the correct implementation approach is unclear
 
-The OpenCode worker does not perform commits, resets, cleanups, or other destructive Git operations on its own.
+The worker blocks destructive Git operations in two layers, both scoped to delegated runs only:
+
+1. **Permission rules enforced by OpenCode.** The worker sets `OPENCODE_CONFIG_CONTENT` with `deny` rules for `git commit`, `push`, `reset`, `clean`, `checkout`, `switch`, `restore`, `stash`, `rebase` and `merge`. Patterns start with `*` because command-rewriting plugins such as rtk turn `git commit` into `rtk git commit` before permissions are evaluated. Your regular OpenCode sessions are not affected. If `OPENCODE_CONFIG_CONTENT` is already set, the worker keeps yours and warns that its rules are not applied.
+2. **Prompt instructions.** The task is prefixed with an instruction to leave changes uncommitted and stay inside the project directory, so the model does not waste turns on denied commands.
+
+This is a guardrail, not a sandbox. A pattern-based rule does not catch forms like `git -C . commit` or a script that calls git, and the `build` agent can still edit any file in the project. The main session's diff review remains the real safety check.
+
+### OpenCode non-interactive behavior
+
+Verified with OpenCode 1.18.34:
+
+- Any permission that resolves to `ask` is auto-rejected in `opencode run` (`permission requested: ...; auto-rejecting`). The run does not hang waiting for approval.
+- The process still exits with code 0 after a rejected tool call, so the exit code does not indicate success. The skill tells Claude to check the output and the diff.
+- `--auto` would approve every permission that is not explicitly denied. The worker does not use it.
 
 ## Important behavior
 

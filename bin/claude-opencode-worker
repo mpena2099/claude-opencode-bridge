@@ -2,24 +2,79 @@
 
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
+usage() {
     echo "Usage: claude-opencode-worker <task>" >&2
+    echo "       claude-opencode-worker <<'TASK' ... TASK" >&2
+}
+
+# Prefer stdin so callers can pass the task through a quoted heredoc and avoid
+# shell expansion of $, backticks and quotes inside the task text.
+if [[ $# -gt 0 ]]; then
+    TASK="$*"
+elif [[ ! -t 0 ]]; then
+    TASK="$(cat)"
+else
+    usage
     exit 2
 fi
 
-TASK="$*"
+if [[ -z "${TASK//[[:space:]]/}" ]]; then
+    usage
+    exit 2
+fi
+
 PROJECT_DIR="$(pwd)"
+# Stays below the 600s maximum of Claude Code's Bash tool, so the worker
+# reports its own timeout instead of being killed silently.
+TIMEOUT="${OPENCODE_WORKER_TIMEOUT:-570}"
 
 if ! command -v opencode >/dev/null 2>&1; then
     echo "ERROR: opencode was not found in PATH." >&2
     exit 127
 fi
 
+if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "WARNING: $PROJECT_DIR is not inside a git repository; changes cannot be reviewed with git diff." >&2
+fi
+
+# Enforced by OpenCode itself, and only for delegated runs. Patterns start with
+# "*" because command-rewriting plugins (e.g. rtk) turn "git commit" into
+# "rtk git commit" before permissions are evaluated.
+# shellcheck disable=SC2016
+DEFAULT_CONFIG='{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*git commit*": "deny",
+      "*git push*": "deny",
+      "*git reset*": "deny",
+      "*git clean*": "deny",
+      "*git checkout*": "deny",
+      "*git switch*": "deny",
+      "*git restore*": "deny",
+      "*git stash*": "deny",
+      "*git rebase*": "deny",
+      "*git merge*": "deny"
+    }
+  }
+}'
+
+if [[ -n "${OPENCODE_CONFIG_CONTENT:-}" ]]; then
+    echo "WARNING: OPENCODE_CONFIG_CONTENT is already set; the worker's git deny rules are not applied." >&2
+else
+    export OPENCODE_CONFIG_CONTENT="$DEFAULT_CONFIG"
+fi
+
+PROMPT="You are running as a delegated implementation worker. Leave all changes uncommitted for review. Do not run git commands that commit, push, reset, clean, checkout, switch, restore, stash, rebase or merge; they are denied. Do not edit files outside $PROJECT_DIR.
+
+Task:
+$TASK"
+
 echo "=== OpenCode Worker ==="
 echo "Project: $PROJECT_DIR"
 echo "OpenCode: $(opencode --version)"
+echo "Timeout: ${TIMEOUT}s"
 echo
-
 echo "Starting OpenCode..."
 echo
 
@@ -33,4 +88,16 @@ if [[ -n "${OPENCODE_WORKER_MODEL:-}" ]]; then
     ARGS+=(--model "$OPENCODE_WORKER_MODEL")
 fi
 
-exec opencode "${ARGS[@]}" "$TASK"
+rc=0
+if command -v timeout >/dev/null 2>&1; then
+    timeout -k 15 "$TIMEOUT" opencode "${ARGS[@]}" "$PROMPT" || rc=$?
+else
+    opencode "${ARGS[@]}" "$PROMPT" || rc=$?
+fi
+
+if [[ $rc -eq 124 ]]; then
+    echo >&2
+    echo "ERROR: OpenCode timed out after ${TIMEOUT}s. Changes may be partial." >&2
+fi
+
+exit "$rc"

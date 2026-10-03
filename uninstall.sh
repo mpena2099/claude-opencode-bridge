@@ -21,6 +21,9 @@ backup_if_exists() {
 backup_if_exists "$TARGET_SKILL"
 backup_if_exists "$TARGET_WORKER"
 
+# Only removes the skill directory when empty, so user-added files survive.
+rmdir "$(dirname "$TARGET_SKILL")" 2>/dev/null || true
+
 if [[ -d "$BACKUP_DIR" ]]; then
     echo "Backup saved to: $BACKUP_DIR"
 else

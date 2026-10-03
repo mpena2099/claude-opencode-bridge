@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: shellcheck bin/claude-opencode-worker install.sh uninstall.sh tests/*.sh
+
+      - name: Worker tests
+        run: ./tests/test-worker.sh
+
+      - name: Install, verify and uninstall in a temporary HOME
+        run: |
+          export HOME="$(mktemp -d)"
+          ./install.sh
+          ./tests/test-install.sh
+          ./uninstall.sh
+          test ! -e "$HOME/.claude/skills/delegate-to-opencode"
+          test ! -e "$HOME/.local/bin/claude-opencode-worker"
