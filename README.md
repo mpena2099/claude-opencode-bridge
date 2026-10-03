@@ -164,3 +164,13 @@ The installer will back up an existing target before replacing it.
 ```
 
 The uninstall script backs up the current installed files before removing them.
+
+## Security
+
+This repository must not contain:
+- API keys
+- tokens
+- credentials
+- personal Claude Code config files
+- `.env` files
+- conversation history
