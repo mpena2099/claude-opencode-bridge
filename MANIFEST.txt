@@ -1,12 +1,12 @@
 Claude Code → OpenCode Delegation Bridge
 
 Project version: 1.2.0
-Validated Claude Code version: 2.1.280
+Validated Claude Code version: 2.1.288
 Validated OpenCode version: 1.18.34
 Validated delegated model: muse-spark-1.3-contributor-free
 
 Validated behavior:
-- Opus session: automatic skill selection and delegation to OpenCode.
+- Opus session: automatic skill selection and delegation to OpenCode, with the task passed through a quoted heredoc and a 600000 ms Bash timeout.
 - After delegation: the main Opus session reviews the diff and validation results before accepting the work as complete.
 - Sonnet 5.5 session: no delegation; Claude Code performed the file write itself.
 - Worker: task passed on stdin reaches OpenCode literally; git deny rules from OPENCODE_CONFIG_CONTENT block commits, including commands rewritten by the rtk plugin.
