@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: claude-opencode-worker <task>" >&2
+    exit 2
+fi
+
+TASK="$*"
+PROJECT_DIR="$(pwd)"
+
+if ! command -v opencode >/dev/null 2>&1; then
+    echo "ERROR: opencode was not found in PATH." >&2
+    exit 127
+fi
+
+echo "=== OpenCode Worker ==="
+echo "Project: $PROJECT_DIR"
+echo "OpenCode: $(opencode --version)"
+echo
+
+echo "Starting OpenCode..."
+echo
+
+ARGS=(
+    run
+    --dir "$PROJECT_DIR"
+    --agent build
+)
+
+if [[ -n "${OPENCODE_WORKER_MODEL:-}" ]]; then
+    ARGS+=(--model "$OPENCODE_WORKER_MODEL")
+fi
+
+exec opencode "${ARGS[@]}" "$TASK"
