@@ -49,6 +49,7 @@ For the validated setup, OpenCode reported version `1.18.34` and used `muse-spar
 
 - `skills/delegate-to-opencode/SKILL.md`: Claude Code skill definition, including the Opus-only delegation rule and mandatory main-session review.
 - `skills/delegate-to-opencode/scripts/claude-opencode-worker`: wrapper that launches OpenCode with a timeout, deny rules and a report of what changed.
+- `skills/delegate-to-opencode/references/review-checklist.md`: what the main session checks in every delegated diff.
 - `install.sh`: installs the skill folder into `~/.claude/skills/`.
 - `uninstall.sh`: removes the installed files while creating a timestamped backup first.
 - `tests/test-install.sh`: verifies the installed files match the repository and checks basic metadata.
@@ -75,6 +76,7 @@ Both place:
 ```text
 ~/.claude/skills/delegate-to-opencode/SKILL.md
 ~/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker
+~/.claude/skills/delegate-to-opencode/references/review-checklist.md
 ```
 
 `install.sh` creates a timestamped backup if a target file already exists, and removes the `~/.local/bin/claude-opencode-worker` left by versions before 1.3.0 (after backing it up).
@@ -112,6 +114,22 @@ Commands that must never run in a delegated session of your projects (database r
 *supabase db push*
 *vercel*--prod*
 ```
+
+### Fixing after review
+
+Each run ends with a `Session:` line. When the review finds something to fix, the skill tells Claude to send only the correction to that same OpenCode session, which keeps the context of its earlier work:
+
+```bash
+OPENCODE_WORKER_SESSION=ses_... bash ~/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker <<'TASK'
+Also handle the empty-list case in parse_items.
+TASK
+```
+
+The worker finds the session id by giving each new run a unique title, and pins it with `--session` rather than `--continue`, which could resume an unrelated interactive session in the same directory.
+
+### Review checklist
+
+`references/review-checklist.md` lists what the main session checks before accepting delegated work: edits that weaken existing tests, re-running the checks itself, scope creep and shortfall, and failure patterns a green test run does not show (hardcoded success, swallowed errors, APIs that do not exist in the installed version, dead code). It is adapted from the review guide of [amelnagdy/delegate-skills](https://github.com/amelnagdy/delegate-skills) (MIT).
 
 ### Exit codes
 

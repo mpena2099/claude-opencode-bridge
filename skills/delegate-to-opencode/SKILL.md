@@ -92,7 +92,9 @@ several sequential delegations and review each one before sending the next.
 7. Run the relevant tests, checks, linters, or other validation yourself when
    appropriate.
 8. Review the implementation against the original requirements, including scope,
-   correctness, regressions, and unintended changes.
+   correctness, regressions, and unintended changes, following
+   [references/review-checklist.md](references/review-checklist.md): weakened
+   tests, hardcoded success, swallowed errors, nonexistent APIs, dead code.
 9. Only after this review should you consider the delegated task complete.
 
 The review in steps 6-8 should be performed by the main Claude Code session
@@ -100,6 +102,23 @@ The review in steps 6-8 should be performed by the main Claude Code session
 OpenCode.
 
 Do not blindly trust OpenCode's conclusions or its statement that tests pass.
+
+## Fixing after review
+
+The worker ends with a `Session:` line. When the review finds something
+OpenCode should fix, send only the correction to that same session instead of
+restating the whole task; OpenCode keeps the context of its earlier work:
+
+```bash
+OPENCODE_WORKER_SESSION=ses_... bash <skill-base-dir>/scripts/claude-opencode-worker <<'TASK'
+<only what must change, and why>
+TASK
+```
+
+The resumed run keeps the session's model. Its `Worker changes` section shows
+only the changes from this round, so review it the same way. Small fixes are
+often faster to make yourself; resume when the correction is mechanical and
+spread across the files OpenCode already touched.
 
 ## What the worker blocks
 

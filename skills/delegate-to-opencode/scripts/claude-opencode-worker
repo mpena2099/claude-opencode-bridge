@@ -144,9 +144,20 @@ except Exception:
     MODEL_LABEL="OpenCode default (last used: ${LAST_MODEL:-unknown}); set OPENCODE_WORKER_MODEL to pin it"
 fi
 
+# Resuming the worker's own session lets a review send only the correction
+# instead of restating the whole task. The session id is pinned rather than
+# using --continue, which could pick up an unrelated interactive session.
+SESSION="${OPENCODE_WORKER_SESSION:-}"
+if [[ -n "$SESSION" && ! "$SESSION" =~ ^ses_[A-Za-z0-9]+$ ]]; then
+    echo "ERROR: OPENCODE_WORKER_SESSION must be an OpenCode session id (ses_...)." >&2
+    exit 2
+fi
+RUN_TITLE="claude-opencode-worker $(date +%Y%m%dT%H%M%S)-$$-$RANDOM"
+
 PROMPT="You are running as a delegated implementation worker. Leave all changes uncommitted for review. Do not run git commands that commit, push, reset, clean, checkout, switch, restore, stash, rebase or merge; they are denied. Do not edit files outside $PROJECT_DIR. Do not delete directories recursively; that is denied too, as are any extra commands the user configured.
 
-Task:
+${SESSION:+Follow-up on the task you already worked on in this session. Apply only this change and keep the rest of your earlier work:
+}Task:
 $TASK"
 
 echo "=== OpenCode Worker ==="
@@ -154,6 +165,9 @@ echo "Project: $PROJECT_DIR"
 echo "OpenCode: $(opencode --version)"
 echo "Model: $MODEL_LABEL"
 echo "Timeout: ${TIMEOUT}s"
+if [[ -n "$SESSION" ]]; then
+    echo "Resuming session: $SESSION"
+fi
 if [[ -n "$PREEXISTING" ]]; then
     echo "Pre-existing changes (not the worker's):"
     indent <<< "$PREEXISTING"
@@ -172,6 +186,12 @@ if [[ -n "${OPENCODE_WORKER_MODEL:-}" ]]; then
     ARGS+=(--model "$OPENCODE_WORKER_MODEL")
 fi
 
+if [[ -n "$SESSION" ]]; then
+    ARGS+=(--session "$SESSION")
+else
+    ARGS+=(--title "$RUN_TITLE")
+fi
+
 LOG="$(mktemp "${TMPDIR:-/tmp}/opencode-worker.XXXXXX")"
 trap 'rm -f "$LOG"' EXIT
 
@@ -180,6 +200,22 @@ if command -v timeout >/dev/null 2>&1; then
     timeout -k 15 "$TIMEOUT" opencode "${ARGS[@]}" "$PROMPT" 2>&1 | tee "$LOG" || rc=${PIPESTATUS[0]}
 else
     opencode "${ARGS[@]}" "$PROMPT" 2>&1 | tee "$LOG" || rc=${PIPESTATUS[0]}
+fi
+
+# A new session is found again by its unique title, so a later review can
+# resume it with OPENCODE_WORKER_SESSION.
+if [[ -z "$SESSION" ]]; then
+    SESSION="$(cd "$PROJECT_DIR" && timeout 20 opencode session list --format json -n 20 2>/dev/null \
+        | RUN_TITLE="$RUN_TITLE" python3 -c '
+import json, os, sys
+try:
+    for s in json.load(sys.stdin):
+        if s.get("title") == os.environ["RUN_TITLE"]:
+            print(s["id"])
+            break
+except Exception:
+    pass
+' 2>/dev/null || true)"
 fi
 
 echo
@@ -200,6 +236,12 @@ fi
 if [[ -n "$CHANGED_UNTRACKED" ]]; then
     echo "Already-untracked files the worker changed (not in git diff):"
     indent <<< "$CHANGED_UNTRACKED"
+fi
+
+if [[ -n "$SESSION" ]]; then
+    echo
+    echo "Session: $SESSION"
+    echo "Send a correction with: OPENCODE_WORKER_SESSION=$SESSION bash $(realpath "$0" 2>/dev/null || echo "$0") <<'TASK'"
 fi
 
 if [[ $rc -eq 124 ]]; then

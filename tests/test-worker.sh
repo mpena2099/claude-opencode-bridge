@@ -24,6 +24,23 @@ if [[ "${1:-}" == "--version" ]]; then
     echo "0.0.0-stub"
     exit 0
 fi
+if [[ "${1:-}" == "session" ]]; then
+    printf '%s\n' "$@" > "$STUB_OUT/session-args"
+    if [[ -z "${STUB_SESSIONS+x}" && -f "$STUB_OUT/title" ]]; then
+        printf '[{"id":"ses_TEST123","title":"%s"}]' "$(cat "$STUB_OUT/title")"
+        exit 0
+    fi
+    printf '%s' "${STUB_SESSIONS:-[]}"
+    exit 0
+fi
+prev=""
+for arg in "$@"; do
+    if [[ "$prev" == "--title" ]]; then
+        printf '%s' "$arg" > "$STUB_OUT/title"
+        break
+    fi
+    prev="$arg"
+done
 printf '%s\n' "$@" > "$STUB_OUT/args"
 printf '%s' "${OPENCODE_CONFIG_CONTENT:-}" > "$STUB_OUT/config"
 if [[ -n "${STUB_PRINT:-}" ]]; then
@@ -149,5 +166,45 @@ echo before > "$TMP/repo/old-untracked.txt"
 STUB_ACTION='echo after >> old-untracked.txt' run_worker "task" > "$TMP/out-untracked" 2> "$TMP/err-untracked" || fail "untracked run failed"
 grep -Fq 'Already-untracked files the worker changed' "$TMP/out-untracked" || fail "untracked header missing"
 grep -Fq 'old-untracked.txt' "$TMP/out-untracked" || fail "untracked file missing from report"
+
+# New run passes a unique --title and no --session.
+rm -f "$TMP/out/title"
+STUB_SESSIONS='[]' run_worker "task" > "$TMP/out-new" || fail "new run failed"
+grep -Fxq -- '--title' "$TMP/out/args" || fail "--title missing on new run"
+TITLE="$(awk '/^--title$/{getline; print}' "$TMP/out/args")"
+[[ "$TITLE" == claude-opencode-worker\ * ]] || fail "unexpected --title value: $TITLE"
+if grep -Fxq -- '--session' "$TMP/out/args"; then
+    fail "new run should not pass --session"
+fi
+rm -f "$TMP/out/title"
+
+# Session discovery finds the new session by title.
+rm -f "$TMP/out/title"
+unset STUB_SESSIONS
+run_worker "task" > "$TMP/out-session" || fail "session discovery run failed"
+grep -Fq 'Session: ses_TEST123' "$TMP/out-session" || fail "session id missing from report"
+grep -Fq 'OPENCODE_WORKER_SESSION=ses_TEST123' "$TMP/out-session" || fail "session resume hint missing"
+rm -f "$TMP/out/title"
+
+# Resume passes --session and a follow-up prompt, without --title.
+rm -f "$TMP/out/title" "$TMP/out/args"
+STUB_SESSIONS='[]' OPENCODE_WORKER_SESSION=ses_ABC run_worker "task" > "$TMP/out-resume" || fail "resume run failed"
+grep -Fxq -- '--session' "$TMP/out/args" || fail "--session missing on resume"
+RESUME_SESSION="$(awk '/^--session$/{getline; print}' "$TMP/out/args")"
+[[ "$RESUME_SESSION" == "ses_ABC" ]] || fail "unexpected --session value: $RESUME_SESSION"
+if grep -Fxq -- '--title' "$TMP/out/args"; then
+    fail "resume should not pass --title"
+fi
+grep -Fq 'Follow-up on the task you already worked on' "$TMP/out/args" || fail "follow-up prompt missing"
+grep -Fq 'Resuming session: ses_ABC' "$TMP/out-resume" || fail "resuming header missing"
+rm -f "$TMP/out/title"
+
+# Invalid session ids are rejected before calling OpenCode.
+rm -f "$TMP/out/title" "$TMP/out/args"
+rc=0; OPENCODE_WORKER_SESSION='bad; rm' run_worker "task" > /dev/null 2> "$TMP/err-invalid" || rc=$?
+[[ $rc -eq 2 ]] || fail "invalid session id should exit 2, got $rc"
+grep -Fq 'must be an OpenCode session id' "$TMP/err-invalid" || fail "invalid session message missing"
+[[ ! -e "$TMP/out/args" ]] || fail "opencode should not run on invalid session id"
+rm -f "$TMP/out/title"
 
 echo "PASS: worker behaves as expected."
