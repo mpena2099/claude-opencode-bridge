@@ -36,6 +36,11 @@ grep -Eq '^name: delegate-to-opencode$' "$SOURCE_SKILL" || fail "Skill name is m
 grep -Fq 'current main model is Opus' <<< "$FLAT_SKILL" || fail "Opus rule is missing"
 grep -Fq 'current model is Sonnet' <<< "$FLAT_SKILL" || fail "Sonnet rule is missing"
 
+REPO_VERSION="$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$REPO_DIR/VERSION")"
+SKILL_VERSION="$(sed -n '/^metadata:/,/^---$/p' "$SOURCE_SKILL" | grep -E '^[[:space:]]*version:' | sed -e 's/^[[:space:]]*version:[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
+[[ -n "$SKILL_VERSION" ]] || fail "Skill version is missing"
+[[ "$SKILL_VERSION" == "$REPO_VERSION" ]] || fail "Skill version $SKILL_VERSION differs from VERSION $REPO_VERSION"
+
 echo "PASS: bridge files are installed and match the repository."
 if command -v opencode >/dev/null 2>&1; then
     echo "OpenCode: $(opencode --version)"

@@ -24,6 +24,10 @@ if [[ "${1:-}" == "--version" ]]; then
     echo "0.0.0-stub"
     exit 0
 fi
+if [[ "${1:-}" == "models" ]]; then
+    printf '%s\n' "${STUB_MODELS:-provider/model}"
+    exit "${STUB_MODELS_EXIT:-0}"
+fi
 if [[ "${1:-}" == "session" ]]; then
     printf '%s\n' "$@" > "$STUB_OUT/session-args"
     if [[ -z "${STUB_SESSIONS+x}" && -f "$STUB_OUT/title" ]]; then
@@ -59,6 +63,7 @@ chmod +x "$TMP/bin/opencode"
 export PATH="$TMP/bin:$PATH"
 export STUB_OUT="$TMP/out"
 export OPENCODE_WORKER_DENY_FILE="$TMP/no-deny-file"
+export OPENCODE_WORKER_MODELS_FILE="$TMP/no-models-file"
 unset OPENCODE_CONFIG_CONTENT OPENCODE_WORKER_MODEL OPENCODE_WORKER_TIMEOUT
 unset STUB_PRINT STUB_ACTION STUB_EXIT STUB_SLEEP
 
@@ -206,5 +211,60 @@ rc=0; OPENCODE_WORKER_SESSION='bad; rm' run_worker "task" > /dev/null 2> "$TMP/e
 grep -Fq 'must be an OpenCode session id' "$TMP/err-invalid" || fail "invalid session message missing"
 [[ ! -e "$TMP/out/args" ]] || fail "opencode should not run on invalid session id"
 rm -f "$TMP/out/title"
+
+# Allowed models list: comments, blank lines and trailing notes are ignored.
+cat > "$TMP/models-default" <<'EOF'
+# cheap models
+
+a/first  # cheap
+b/second
+EOF
+STUB_MODELS=$'a/first\nb/second' OPENCODE_WORKER_MODELS_FILE="$TMP/models-default" run_worker "task" > "$TMP/out-models-default" || fail "default model run failed"
+grep -Fxq -- '--model' "$TMP/out/args" || fail "default --model missing"
+MODEL_ARG="$(awk '/^--model$/{getline; print}' "$TMP/out/args")"
+[[ "$MODEL_ARG" == "a/first" ]] || fail "default model should be a/first, got $MODEL_ARG"
+grep -Fq 'Model: a/first' "$TMP/out-models-default" || fail "default model label missing"
+
+# Explicit OPENCODE_WORKER_MODEL inside the allowed list is used.
+STUB_MODELS=$'a/first\nb/second' OPENCODE_WORKER_MODELS_FILE="$TMP/models-default" OPENCODE_WORKER_MODEL=b/second run_worker "task" > /dev/null || fail "explicit allowed model run failed"
+MODEL_ARG="$(awk '/^--model$/{getline; print}' "$TMP/out/args")"
+[[ "$MODEL_ARG" == "b/second" ]] || fail "explicit model should be b/second, got $MODEL_ARG"
+
+# A model outside the allowed list is rejected before calling OpenCode.
+rm -f "$TMP/out/args"
+rc=0; STUB_MODELS=$'a/first\nb/second' OPENCODE_WORKER_MODELS_FILE="$TMP/models-default" OPENCODE_WORKER_MODEL=c/other run_worker "task" > /dev/null 2> "$TMP/err-models-not-allowed" || rc=$?
+[[ $rc -eq 2 ]] || fail "disallowed model should exit 2, got $rc"
+grep -Fq 'is not in' "$TMP/err-models-not-allowed" || fail "disallowed model message missing"
+[[ ! -e "$TMP/out/args" ]] || fail "opencode should not run on disallowed model"
+
+# An allowed model missing from `opencode models` is rejected.
+cat > "$TMP/models-first-only" <<'EOF'
+a/first
+EOF
+rm -f "$TMP/out/args"
+rc=0; STUB_MODELS='z/else' OPENCODE_WORKER_MODELS_FILE="$TMP/models-first-only" run_worker "task" > /dev/null 2> "$TMP/err-models-unavailable" || rc=$?
+[[ $rc -eq 2 ]] || fail "unavailable model should exit 2, got $rc"
+grep -Fq 'is not available in OpenCode' "$TMP/err-models-unavailable" || fail "unavailable model message missing"
+[[ ! -e "$TMP/out/args" ]] || fail "opencode should not run on unavailable model"
+
+# When `opencode models` fails, the run proceeds without a model check.
+rm -f "$TMP/out/args"
+STUB_MODELS='a/first' STUB_MODELS_EXIT=1 OPENCODE_WORKER_MODELS_FILE="$TMP/models-first-only" run_worker "task" > /dev/null 2> "$TMP/err-models-list-fails" || fail "model listing failure run failed"
+grep -Fq 'could not list OpenCode models' "$TMP/err-models-list-fails" || fail "model listing warning missing"
+MODEL_ARG="$(awk '/^--model$/{getline; print}' "$TMP/out/args")"
+[[ "$MODEL_ARG" == "a/first" ]] || fail "model should be a/first when listing fails, got $MODEL_ARG"
+
+# Resume keeps the session's model unless one is given explicitly.
+STUB_SESSIONS='[]' OPENCODE_WORKER_MODELS_FILE="$TMP/models-first-only" OPENCODE_WORKER_SESSION=ses_ABC run_worker "task" > "$TMP/out-models-resume" || fail "resume model run failed"
+if grep -Fxq -- '--model' "$TMP/out/args"; then
+    fail "resume should not pass --model"
+fi
+grep -Fq "resumed session's model" "$TMP/out-models-resume" || fail "resume model label missing"
+
+# Without a models file and without an override, no --model is passed.
+STUB_MODELS='provider/model' OPENCODE_WORKER_MODELS_FILE="$TMP/no-models-file" run_worker "task" > /dev/null || fail "no models file run failed"
+if grep -Fxq -- '--model' "$TMP/out/args"; then
+    fail "no models file should not pass --model"
+fi
 
 echo "PASS: worker behaves as expected."

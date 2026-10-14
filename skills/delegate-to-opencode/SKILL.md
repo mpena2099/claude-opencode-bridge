@@ -11,6 +11,13 @@ description: >
   changes and tests before considering the delegated work complete. Do not use
   when the current model is Sonnet. Do not delegate architectural decisions,
   ambiguous requirements, security-sensitive work, or difficult debugging.
+license: MIT
+compatibility: >-
+  Built for Claude Code. Requires the opencode CLI, git and bash; python3 is
+  used to report the model and find the OpenCode session, and the worker
+  still runs without it.
+metadata:
+  version: 1.5.0
 ---
 
 # Delegate to OpenCode
@@ -51,6 +58,25 @@ Done when: <observable result and the exact test/check command to run>
 Keep each task small enough to finish in a few minutes. Split larger work into
 several sequential delegations and review each one before sending the next.
 
+## Choosing the model
+
+The user lists the models allowed for delegated work in
+`~/.config/claude-opencode-worker/models`, one `provider/model` per line,
+optionally followed by `# when to use it`. Only the user knows which models
+are free or flat-rate for them; `opencode models` lists hundreds, most billed
+per token.
+
+- Read that file before delegating. Pick per task from that list: a fast,
+  cheap model for mechanical sweeps; the strongest listed one for subtle
+  logic. Pass it as `OPENCODE_WORKER_MODEL=provider/model`. With no variable
+  the worker uses the first listed model.
+- The worker refuses (exit 2) a model that is not in the list or that
+  OpenCode no longer offers. Free models disappear often; when that happens,
+  tell the user which one is gone instead of picking a replacement yourself.
+- If the file does not exist, ask the user which models to use before the
+  first delegation, and offer to create the file. Do not guess from
+  `opencode models`.
+
 ## Delegation workflow
 
 1. Preserve all relevant requirements from the user's request.
@@ -74,15 +100,15 @@ several sequential delegations and review each one before sending the next.
    `OPENCODE_WORKER_TIMEOUT=1500 bash <skill-base-dir>/scripts/claude-opencode-worker <<'TASK'`,
    and wait for the completion notification.
 
-   `OPENCODE_WORKER_MODEL=provider/model` pins the model; otherwise the
-   worker prints which model OpenCode will probably use.
+   Choose the model as described in "Choosing the model" below.
 
 4. Wait for OpenCode to finish, then read the exit code:
    - `0`: finished with no denied permission.
    - `3`: finished, but a permission was denied or auto-rejected; the output
      lists which. The task may be incomplete.
    - `124`: timed out; changes may be partial.
-   - `2`: usage error or not inside a git repository; nothing ran.
+   - `2`: usage error, not inside a git repository, or a model that is not
+     allowed or no longer available; nothing ran.
 5. Treat OpenCode's output as an implementation attempt, not as final approval.
 6. Inspect the diff yourself. The worker ends with a `Worker changes` section
    and a `git diff <baseline>` command that shows only what OpenCode changed,
