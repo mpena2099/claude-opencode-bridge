@@ -131,7 +131,7 @@ OPENCODE_WORKER_DENY_FILE="$TMP/deny" run_worker "task" > /dev/null || fail "den
 python3 -m json.tool "$TMP/out/config" > /dev/null || fail "deny config is not valid JSON"
 grep -Fq '"*supabase db reset*": "deny"' "$TMP/out/config" || fail "deny file pattern missing"
 grep -Fq '"*say \"hi\"*": "deny"' "$TMP/out/config" || fail "deny file quote pattern missing"
-grep -Fq '"external_directory": "deny"' "$TMP/out/config" || fail "external_directory deny missing"
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["permission"]["external_directory"]["*"] == "deny"' "$TMP/out/config" || fail "external_directory deny missing"
 if grep -Fq 'ignore-me-comment-xyz' "$TMP/out/config"; then
     fail "deny file comment leaked into config"
 fi
@@ -144,6 +144,50 @@ grep -Fq 'denied or auto-rejected' "$TMP/err" || fail "auto-reject message missi
 # Deny-rule hits are reported with exit 3.
 rc=0; STUB_PRINT='Error: The user has specified a rule which prevents you from using this specific tool call.' run_worker "task" > /dev/null 2> "$TMP/err" || rc=$?
 [[ $rc -eq 3 ]] || fail "deny hit should exit 3, got $rc"
+
+# The deny message quoted inside file content (e.g. a printed diff) is not a hit.
+rc=0; STUB_PRINT="+  STUB_PRINT='Error: The user has specified a rule which prevents you from using this specific tool call.'" run_worker "task" > /dev/null 2>&1 || rc=$?
+[[ $rc -eq 0 ]] || fail "quoted deny message should not exit 3, got $rc"
+
+# Default run uses the build agent.
+run_worker "task" > /dev/null || fail "default agent run failed"
+AGENT_ARG="$(awk '/^--agent$/{getline; print}' "$TMP/out/args")"
+[[ "$AGENT_ARG" == "build" ]] || fail "default agent should be build, got $AGENT_ARG"
+
+# Read-only mode uses the plan agent, a deny-all config and a read-only prompt.
+OPENCODE_WORKER_MODE='read' run_worker "task" > "$TMP/out-read" 2> "$TMP/err-read" || fail "read mode run failed"
+READ_AGENT="$(awk '/^--agent$/{getline; print}' "$TMP/out/args")"
+[[ "$READ_AGENT" == "plan" ]] || fail "read mode agent should be plan, got $READ_AGENT"
+python3 -m json.tool "$TMP/out/config" > /dev/null || fail "read config is not valid JSON"
+grep -Fq '"edit": "deny"' "$TMP/out/config" || fail "read edit deny missing"
+grep -Fq '"*": "deny"' "$TMP/out/config" || fail "read bash deny-all missing"
+grep -Fq '"git log *": "allow"' "$TMP/out/config" || fail "read git log allow missing"
+grep -Fq '"rtk git log *": "allow"' "$TMP/out/config" || fail "read rtk git log allow missing"
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["permission"]["external_directory"]["*"] == "deny"' "$TMP/out/config" || fail "read external_directory deny missing"
+grep -Fq 'read-only analysis worker' "$TMP/out/args" || fail "read-only prompt missing"
+grep -Fq 'Mode: read' "$TMP/out-read" || fail "read mode label missing"
+
+# Read-only mode ignores the extra deny file.
+OPENCODE_WORKER_MODE='read' OPENCODE_WORKER_DENY_FILE="$TMP/deny" run_worker "task" > /dev/null || fail "read deny file run failed"
+if grep -Fq '*supabase db reset*' "$TMP/out/config"; then
+    fail "read mode should ignore deny file"
+fi
+
+# Read-only mode fails when the run creates a new file.
+rc=0; OPENCODE_WORKER_MODE='read' STUB_ACTION='echo x > read-only-new.txt' run_worker "task" > /dev/null 2> "$TMP/err-read-new" || rc=$?
+[[ $rc -eq 4 ]] || fail "read-only new file should exit 4, got $rc"
+grep -Fq 'read-only run changed the working tree' "$TMP/err-read-new" || fail "read-only new file message missing"
+rm -f "$TMP/repo/read-only-new.txt"
+
+# Read-only mode fails when the run modifies a tracked file.
+rc=0; OPENCODE_WORKER_MODE='read' STUB_ACTION='echo changed > init.txt' run_worker "task" > /dev/null 2> "$TMP/err-read-modify" || rc=$?
+[[ $rc -eq 4 ]] || fail "read-only modify should exit 4, got $rc"
+echo init > "$TMP/repo/init.txt"
+
+# Unknown modes are usage errors.
+rc=0; OPENCODE_WORKER_MODE='bogus' run_worker "task" > /dev/null 2> "$TMP/err-bogus" || rc=$?
+[[ $rc -eq 2 ]] || fail "bogus mode should exit 2, got $rc"
+grep -Fq 'OPENCODE_WORKER_MODE must be' "$TMP/err-bogus" || fail "bogus mode message missing"
 
 # Baseline diff excludes pre-existing changes.
 echo base > "$TMP/repo/pre.txt"

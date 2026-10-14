@@ -85,7 +85,7 @@ Both place:
 
 - Claude Code with support for Skills.
 - OpenCode installed and available as `opencode` in `PATH`.
-- A working OpenCode `build` agent.
+- Working OpenCode `build` and `plan` agents (`plan` is used by read-only runs).
 - The project being changed must be a git repository. The worker refuses to run elsewhere, because without git there is no diff to review.
 
 ### Choosing the model
@@ -133,6 +133,19 @@ TASK
 
 The worker finds the session id by giving each new run a unique title, and pins it with `--session` rather than `--continue`, which could resume an unrelated interactive session in the same directory.
 
+### Read-only analysis
+
+For questions about the code (every call site of a function, how a module computes something, which routes skip a check), the skill runs the worker with `OPENCODE_WORKER_MODE=read`:
+
+```bash
+OPENCODE_WORKER_MODE=read bash ~/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker <<'TASK'
+Goal: list every caller of create_token and what each one passes.
+Done when: each caller is cited with file:line.
+TASK
+```
+
+OpenCode then runs its `plan` agent with file edits denied and bash limited to commands that only read: `git log`, `show`, `diff`, `blame`, `grep`, `status` and `ls-files`, plus `ls`, `cat`, `head`, `tail`, `grep`, `wc`, `sort` and `uniq`. Bash is not denied outright because OpenCode's free tier rejects requests without the bash tool. An allowed command could still write through a redirect, so after the run the worker checks the working tree against its snapshot and exits with code 4 if anything changed. Commands in pipes are checked one by one, so `git log | head` passes and `git log | xargs rm` does not. The skill tells Claude to treat the answer as a lead and to open the cited lines before acting on it.
+
 ### Review checklist
 
 `references/review-checklist.md` lists what the main session checks before accepting delegated work: edits that weaken existing tests, re-running the checks itself, scope creep and shortfall, and failure patterns a green test run does not show (hardcoded success, swallowed errors, APIs that do not exist in the installed version, dead code). It is adapted from the review guide of [amelnagdy/delegate-skills](https://github.com/amelnagdy/delegate-skills) (MIT).
@@ -144,6 +157,7 @@ The worker finds the session id by giving each new run a unique title, and pins 
 | 0 | OpenCode finished and no permission was denied |
 | 2 | Usage error, not inside a git repository, or a requested model that OpenCode does not offer; nothing ran |
 | 3 | OpenCode finished, but a permission was denied or auto-rejected; the task may be incomplete |
+| 4 | A read-only run changed the working tree |
 | 124 | Timeout; changes may be partial |
 | 127 | `opencode` not found |
 

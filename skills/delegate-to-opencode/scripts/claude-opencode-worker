@@ -7,6 +7,7 @@ set -euo pipefail
 #   2    usage error, not inside a git repository, or a requested model that
 #        OpenCode does not offer
 #   3    OpenCode finished but a permission was denied or auto-rejected
+#   4    a read-only run (OPENCODE_WORKER_MODE=read) changed the working tree
 #   124  OpenCode timed out; changes may be partial
 #   127  opencode not found
 #   other  OpenCode's own exit code
@@ -116,15 +117,69 @@ for pattern in "${DENY_PATTERNS[@]}"; do
       \"$(json_escape "$pattern")\": \"deny\""
 done
 
+# Everything outside the project is denied except OpenCode's own scratch and
+# truncated-output directories, which it allows by default and needs to read
+# long command output.
+EXTERNAL_RULES='
+      "*": "deny",
+      "/tmp/opencode/*": "allow",
+      "'"$(json_escape "${XDG_DATA_HOME:-$HOME/.local/share}")"'/opencode/tool-output/*": "allow"'
+
 # shellcheck disable=SC2016
 DEFAULT_CONFIG='{
   "$schema": "https://opencode.ai/config.json",
   "permission": {
-    "external_directory": "deny",
+    "external_directory": {'"$EXTERNAL_RULES"'
+    },
     "bash": {'"$BASH_RULES"'
     }
   }
 }'
+
+# Read-only runs use OpenCode's plan agent and keep bash to commands that only
+# read. Bash stays enabled with an allowlist instead of being denied outright:
+# without the bash tool, OpenCode's free tier rejects the request. An allowed
+# command can still write through a redirect, so the tree is checked after the
+# run as well.
+MODE="${OPENCODE_WORKER_MODE:-edit}"
+READ_ONLY_COMMANDS=(
+    "git status" "git log" "git show" "git diff" "git blame" "git grep"
+    "git ls-files" "ls" "cat" "head" "tail" "grep" "wc" "sort" "uniq"
+)
+case "$MODE" in
+    edit)
+        AGENT=build
+        ;;
+    read)
+        AGENT=plan
+        BASH_RULES='
+      "*": "deny"'
+        for cmd in "${READ_ONLY_COMMANDS[@]}"; do
+            # rtk rewrites commands with an "rtk " prefix before permissions
+            # are evaluated.
+            BASH_RULES+=",
+      \"$cmd\": \"allow\",
+      \"$cmd *\": \"allow\",
+      \"rtk $cmd\": \"allow\",
+      \"rtk $cmd *\": \"allow\""
+        done
+        # shellcheck disable=SC2016
+        DEFAULT_CONFIG='{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "external_directory": {'"$EXTERNAL_RULES"'
+    },
+    "edit": "deny",
+    "bash": {'"$BASH_RULES"'
+    }
+  }
+}'
+        ;;
+    *)
+        echo "ERROR: OPENCODE_WORKER_MODE must be edit or read." >&2
+        exit 2
+        ;;
+esac
 
 if [[ -n "${OPENCODE_CONFIG_CONTENT:-}" ]]; then
     echo "WARNING: OPENCODE_CONFIG_CONTENT is already set; the worker's deny rules are not applied." >&2
@@ -174,15 +229,24 @@ fi
 
 RUN_TITLE="claude-opencode-worker $(date +%Y%m%dT%H%M%S)-$$-$RANDOM"
 
-PROMPT="You are running as a delegated implementation worker. Leave all changes uncommitted for review. Do not run git commands that commit, push, reset, clean, checkout, switch, restore, stash, rebase or merge; they are denied. Do not edit files outside $PROJECT_DIR. Do not delete directories recursively; that is denied too, as are any extra commands the user configured.
+if [[ "$MODE" == read ]]; then
+    PROMPT="You are running as a delegated read-only analysis worker. Do not create, edit or delete any file, and do not run commands that change anything; file edits are denied and bash only allows commands that read. Answer the task with your findings, citing file paths and line numbers, and say plainly when you are not sure of something.
+
+${SESSION:+Follow-up question on the analysis you already did in this session:
+}Task:
+$TASK"
+else
+    PROMPT="You are running as a delegated implementation worker. Leave all changes uncommitted for review. Do not run git commands that commit, push, reset, clean, checkout, switch, restore, stash, rebase or merge; they are denied. Do not edit files outside $PROJECT_DIR. Do not delete directories recursively; that is denied too, as are any extra commands the user configured.
 
 ${SESSION:+Follow-up on the task you already worked on in this session. Apply only this change and keep the rest of your earlier work:
 }Task:
 $TASK"
+fi
 
 echo "=== OpenCode Worker ==="
 echo "Project: $PROJECT_DIR"
 echo "OpenCode: $(opencode --version)"
+echo "Mode: $MODE"
 echo "Model: $MODEL_LABEL"
 echo "Timeout: ${TIMEOUT}s"
 if [[ -n "$SESSION" ]]; then
@@ -199,7 +263,7 @@ echo
 ARGS=(
     run
     --dir "$PROJECT_DIR"
-    --agent build
+    --agent "$AGENT"
 )
 
 if [[ -n "$MODEL" ]]; then
@@ -277,12 +341,30 @@ fi
 
 # "auto-rejecting" comes from permissions set to ask; the other message comes
 # from the deny rules above. Both leave the task possibly incomplete.
-REJECTED="$(grep -a -E 'auto-rejecting|prevents you from using this specific tool call' "$LOG" | cut -c1-200 || true)"
+# The deny message is matched only at the start of a line (after colour codes),
+# so file content that quotes it, e.g. in a printed diff, is not a hit.
+COLOUR=$'(\033\\[[0-9;]*m)*'
+REJECTED="$(grep -a -E "auto-rejecting|^${COLOUR}Error: ${COLOUR}The user has specified a rule which prevents you" "$LOG" | cut -c1-200 || true)"
 if [[ -n "$REJECTED" ]]; then
     echo >&2
     echo "ERROR: OpenCode hit denied or auto-rejected permissions; the task may be incomplete:" >&2
     indent <<< "$REJECTED" >&2
     [[ $rc -eq 0 ]] && rc=3
+fi
+
+if [[ "$MODE" == read ]]; then
+    TREE_CHANGED=""
+    if [[ -n "$BASELINE" ]]; then
+        git -C "$PROJECT_DIR" diff --quiet "$BASELINE" || TREE_CHANGED=1
+    else
+        git -C "$PROJECT_DIR" diff --quiet || TREE_CHANGED=1
+    fi
+    [[ "$UNTRACKED_BEFORE" == "$UNTRACKED_AFTER" ]] || TREE_CHANGED=1
+    if [[ -n "$TREE_CHANGED" ]]; then
+        echo >&2
+        echo "ERROR: the read-only run changed the working tree; see Worker changes above." >&2
+        rc=4
+    fi
 fi
 
 exit "$rc"

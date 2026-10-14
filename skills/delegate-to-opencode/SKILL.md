@@ -7,6 +7,9 @@ description: >
   to OpenCode: e.g. writing tests for an existing route or function, adding a
   simple migration or column, applying the same change across several
   components, renaming, wiring an endpoint that follows an existing pattern.
+  Also delegate read-only analysis that means reading many files: mapping
+  every call site of a function, summarizing how a module works, finding the
+  code that matches a pattern.
   After OpenCode finishes, the main Opus session must review the resulting
   changes and tests before considering the delegated work complete. Do not use
   when the current model is Sonnet. Do not delegate architectural decisions,
@@ -17,7 +20,7 @@ compatibility: >-
   used to report the model and find the OpenCode session, and the worker
   still runs without it.
 metadata:
-  version: 1.6.0
+  version: 1.7.0
 ---
 
 # Delegate to OpenCode
@@ -67,6 +70,30 @@ meant. Never choose a model on your own: most entries in `opencode models`
 are billed per token. If the worker reports that the requested model is not
 available, tell the user instead of picking a replacement.
 
+## Read-only analysis
+
+For questions about the code, not changes to it, run the worker with
+`OPENCODE_WORKER_MODE=read`. OpenCode then runs its `plan` agent with file
+edits denied and bash limited to commands that only read (`git log`,
+`git show`, `git diff`, `git blame`, `git grep`, `git status`,
+`git ls-files`, `ls`, `cat`, `head`, `tail`, `grep`, `wc`, `sort`, `uniq`).
+It answers with findings instead of a diff:
+
+```bash
+OPENCODE_WORKER_MODE=read bash <skill-base-dir>/scripts/claude-opencode-worker <<'TASK'
+Goal: <the question to answer>
+Files: <where to look>
+Done when: <what the answer must contain, e.g. every call site with file:line>
+TASK
+```
+
+The answer is a lead, not a fact. Before you act on it or pass it to the
+user, open the files and lines it cites for every point that matters. A
+read-only run may end with exit 3 when OpenCode tried a command outside the
+list and then answered another way; read the answer before treating it as
+incomplete. Exit 4 means something changed the working tree anyway: review
+the `Worker changes` section and tell the user.
+
 ## Delegation workflow
 
 1. Preserve all relevant requirements from the user's request.
@@ -99,6 +126,7 @@ available, tell the user instead of picking a replacement.
    - `124`: timed out; changes may be partial.
    - `2`: usage error, not inside a git repository, or a requested model that
      OpenCode does not offer; nothing ran.
+   - `4`: a read-only run changed the working tree.
 5. Treat OpenCode's output as an implementation attempt, not as final approval.
 6. Inspect the diff yourself. The worker ends with a `Worker changes` section
    and a `git diff <baseline>` command that shows only what OpenCode changed,
@@ -140,7 +168,8 @@ spread across the files OpenCode already touched.
 
 OpenCode's own permission system denies, for delegated runs only: git commit,
 push, reset, clean, checkout, switch, restore, stash, rebase and merge;
-`rm -rf`; any file access outside the project directory; and every extra
+`rm -rf`; any file access outside the project directory, except OpenCode's
+own scratch and truncated-output directories; and every extra
 pattern the user listed in `~/.config/claude-opencode-worker/deny` (one shell
 glob per line, e.g. `*supabase db reset*`). Do not ask OpenCode to do any of
 these. If the task needs one of them, do that step yourself after reviewing.
