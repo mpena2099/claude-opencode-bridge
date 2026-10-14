@@ -3,7 +3,8 @@
 set -euo pipefail
 
 TARGET_SKILL="$HOME/.claude/skills/delegate-to-opencode/SKILL.md"
-TARGET_WORKER="$HOME/.local/bin/claude-opencode-worker"
+TARGET_WORKER="$HOME/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker"
+LEGACY_WORKER="$HOME/.local/bin/claude-opencode-worker"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="$HOME/.claude-opencode-bridge-backups/uninstall-$TIMESTAMP"
@@ -20,8 +21,10 @@ backup_if_exists() {
 
 backup_if_exists "$TARGET_SKILL"
 backup_if_exists "$TARGET_WORKER"
+backup_if_exists "$LEGACY_WORKER"
 
-# Only removes the skill directory when empty, so user-added files survive.
+# Only removes the skill directories when empty, so user-added files survive.
+rmdir "$(dirname "$TARGET_WORKER")" 2>/dev/null || true
 rmdir "$(dirname "$TARGET_SKILL")" 2>/dev/null || true
 
 if [[ -d "$BACKUP_DIR" ]]; then

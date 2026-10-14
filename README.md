@@ -1,10 +1,12 @@
 # Claude Code → OpenCode Delegation Bridge
 
+[![skills.sh](https://skills.sh/b/mpena2099/claude-opencode-bridge)](https://skills.sh/mpena2099/claude-opencode-bridge)
+
 A small, version-controlled setup for delegating straightforward coding tasks from Claude Code to OpenCode, with the main Opus session performing the final review.
 
 ## What this project does
 
-When Claude Code is running with Opus, the `delegate-to-opencode` skill can be selected automatically for simple, mechanical, repetitive, or well-defined coding tasks. The skill invokes `claude-opencode-worker`, which runs OpenCode in non-interactive mode. After the worker finishes, the main Opus session reviews the diff and validation results before accepting the work as complete.
+When Claude Code is running with Opus, the `delegate-to-opencode` skill can be selected automatically for simple, mechanical, repetitive, or well-defined coding tasks. The skill invokes `claude-opencode-worker`, a script bundled inside the skill folder, which runs OpenCode in non-interactive mode. After the worker finishes, the main Opus session reviews the diff and validation results before accepting the work as complete.
 
 When Claude Code is running with Sonnet, the skill explicitly tells the model not to use this workflow. This behavior was validated manually in Claude Code.
 
@@ -46,8 +48,8 @@ For the validated setup, OpenCode reported version `1.18.34` and used `muse-spar
 ## Files
 
 - `skills/delegate-to-opencode/SKILL.md`: Claude Code skill definition, including the Opus-only delegation rule and mandatory main-session review.
-- `bin/claude-opencode-worker`: wrapper that launches OpenCode with a timeout and git guardrails.
-- `install.sh`: installs the skill and wrapper into the expected user directories.
+- `skills/delegate-to-opencode/scripts/claude-opencode-worker`: wrapper that launches OpenCode with a timeout, deny rules and a report of what changed.
+- `install.sh`: installs the skill folder into `~/.claude/skills/`.
 - `uninstall.sh`: removes the installed files while creating a timestamped backup first.
 - `tests/test-install.sh`: verifies the installed files match the repository and checks basic metadata.
 - `tests/test-worker.sh`: exercises the worker against a stub `opencode`, without calling any model.
@@ -56,28 +58,35 @@ For the validated setup, OpenCode reported version `1.18.34` and used `muse-spar
 
 ## Installation
 
-Clone or extract this repository, then run:
+With the [skills CLI](https://skills.sh):
+
+```bash
+npx skills add mpena2099/claude-opencode-bridge -g -a claude-code
+```
+
+Or clone this repository and run:
 
 ```bash
 ./install.sh
 ```
 
-The installer places:
+Both place:
 
 ```text
 ~/.claude/skills/delegate-to-opencode/SKILL.md
-~/.local/bin/claude-opencode-worker
+~/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker
 ```
 
-It creates a timestamped backup if either target file already exists.
+`install.sh` creates a timestamped backup if a target file already exists, and removes the `~/.local/bin/claude-opencode-worker` left by versions before 1.3.0 (after backing it up).
 
 ## Requirements
 
 - Claude Code with support for Skills.
 - OpenCode installed and available as `opencode` in `PATH`.
 - A working OpenCode `build` agent.
+- The project being changed must be a git repository. The worker refuses to run elsewhere, because without git there is no diff to review.
 
-The worker does not force an OpenCode model. By default, OpenCode uses its configured default model. To override it for one invocation, set:
+The worker does not force an OpenCode model. By default, OpenCode uses its configured default model, and the worker prints the model OpenCode used last so you can see it. To pin one, set:
 
 ```bash
 export OPENCODE_WORKER_MODEL='provider/model'
@@ -90,6 +99,33 @@ The worker stops OpenCode after 570 seconds and exits with code 124, staying bel
 ```bash
 export OPENCODE_WORKER_TIMEOUT=300
 ```
+
+For a long task that cannot be split, the skill tells Claude to run the worker in the background with a higher `OPENCODE_WORKER_TIMEOUT`, where the Bash tool limit does not apply.
+
+### Extra deny rules
+
+Commands that must never run in a delegated session of your projects (database resets, production deploys) go in `~/.config/claude-opencode-worker/deny`, one shell glob per line. Blank lines and lines starting with `#` are ignored. Another path can be set with `OPENCODE_WORKER_DENY_FILE`.
+
+```text
+# Database and production deploys stay with the main session
+*supabase db reset*
+*supabase db push*
+*vercel*--prod*
+```
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | OpenCode finished and no permission was denied |
+| 2 | Usage error, or not inside a git repository; nothing ran |
+| 3 | OpenCode finished, but a permission was denied or auto-rejected; the task may be incomplete |
+| 124 | Timeout; changes may be partial |
+| 127 | `opencode` not found |
+
+### Report of what changed
+
+Before running, the worker snapshots the working tree with `git stash create`, which does not touch the tree or the stash list. When OpenCode finishes it prints a `Worker changes` section with a diffstat against that snapshot and a ready `git diff <snapshot>` command, so changes you already had are not mixed with the worker's. It also lists new untracked files and files that were already untracked and that OpenCode changed, which `git diff` does not show.
 
 ## Tests
 
@@ -104,10 +140,10 @@ CI runs both, plus ShellCheck and an install/uninstall cycle in a temporary `HOM
 
 ### Verify the worker directly
 
-From a project directory:
+From a git project directory:
 
 ```bash
-claude-opencode-worker <<'TASK'
+bash ~/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker <<'TASK'
 Create a file named opencode-delegation-test.txt containing exactly two lines: DELEGATION_TEST and Executed by an external worker.
 TASK
 ```
@@ -131,7 +167,7 @@ Evidence of actual delegation should include something like:
 
 ```text
 Skill(delegate-to-opencode)
-Bash(~/.local/bin/claude-opencode-worker ...)
+Bash(bash ~/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker ...)
 === OpenCode Worker ===
 OpenCode: ...
 ```
@@ -157,19 +193,21 @@ The skill tells Claude not to delegate:
 - difficult debugging that needs substantial reasoning
 - work where the correct implementation approach is unclear
 
-The worker blocks destructive Git operations in two layers, both scoped to delegated runs only:
+The worker blocks destructive operations in two layers, both scoped to delegated runs only:
 
-1. **Permission rules enforced by OpenCode.** The worker sets `OPENCODE_CONFIG_CONTENT` with `deny` rules for `git commit`, `push`, `reset`, `clean`, `checkout`, `switch`, `restore`, `stash`, `rebase` and `merge`. Patterns start with `*` because command-rewriting plugins such as rtk turn `git commit` into `rtk git commit` before permissions are evaluated. Your regular OpenCode sessions are not affected. If `OPENCODE_CONFIG_CONTENT` is already set, the worker keeps yours and warns that its rules are not applied.
-2. **Prompt instructions.** The task is prefixed with an instruction to leave changes uncommitted and stay inside the project directory, so the model does not waste turns on denied commands.
+1. **Permission rules enforced by OpenCode.** The worker sets `OPENCODE_CONFIG_CONTENT` with `deny` rules for `git commit`, `push`, `reset`, `clean`, `checkout`, `switch`, `restore`, `stash`, `rebase` and `merge`, for `rm -rf`, for file access outside the project (`external_directory`), and for every pattern in your deny file. Patterns start with `*` because command-rewriting plugins such as rtk turn `git commit` into `rtk git commit` before permissions are evaluated. Your regular OpenCode sessions are not affected. If `OPENCODE_CONFIG_CONTENT` is already set, the worker keeps yours and warns that its rules are not applied.
+2. **Prompt instructions.** The task is prefixed with an instruction to leave changes uncommitted, stay inside the project directory and avoid the denied commands, so the model does not waste turns on them.
 
 This is a guardrail, not a sandbox. A pattern-based rule does not catch forms like `git -C . commit` or a script that calls git, and the `build` agent can still edit any file in the project. The main session's diff review remains the real safety check.
 
 ### OpenCode non-interactive behavior
 
-Verified with OpenCode 1.18.34:
+Verified with OpenCode 1.18.35:
 
 - Any permission that resolves to `ask` is auto-rejected in `opencode run` (`permission requested: ...; auto-rejecting`). The run does not hang waiting for approval.
-- The process still exits with code 0 after a rejected tool call, so the exit code does not indicate success. The skill tells Claude to check the output and the diff.
+- A command matching a `deny` rule fails with `The user has specified a rule which prevents you from using this specific tool call`.
+- In both cases OpenCode still exits with code 0. The worker looks for both messages in the output and exits with code 3 instead.
+- OpenCode reads the project's `CLAUDE.md`, but not Claude Code's memory directory, so the skill asks Claude to copy relevant project rules into the task.
 - `--auto` would approve every permission that is not explicitly denied. The worker does not use it.
 
 ## Important behavior

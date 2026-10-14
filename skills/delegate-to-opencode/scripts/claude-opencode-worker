@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Exit codes:
+#   0    OpenCode finished and no permission was auto-rejected
+#   2    usage error, or not inside a git repository
+#   3    OpenCode finished but a permission was denied or auto-rejected
+#   124  OpenCode timed out; changes may be partial
+#   127  opencode not found
+#   other  OpenCode's own exit code
+
+usage() {
+    echo "Usage: claude-opencode-worker <task>" >&2
+    echo "       claude-opencode-worker <<'TASK' ... TASK" >&2
+}
+
+# Prefer stdin so callers can pass the task through a quoted heredoc and avoid
+# shell expansion of $, backticks and quotes inside the task text.
+if [[ $# -gt 0 ]]; then
+    TASK="$*"
+elif [[ ! -t 0 ]]; then
+    TASK="$(cat)"
+else
+    usage
+    exit 2
+fi
+
+if [[ -z "${TASK//[[:space:]]/}" ]]; then
+    usage
+    exit 2
+fi
+
+PROJECT_DIR="$(pwd)"
+# Default stays below the 600s maximum of Claude Code's Bash tool, so the
+# worker reports its own timeout instead of being killed silently. Raise it
+# only when the caller runs the worker in the background.
+TIMEOUT="${OPENCODE_WORKER_TIMEOUT:-570}"
+
+if ! command -v opencode >/dev/null 2>&1; then
+    echo "ERROR: opencode was not found in PATH." >&2
+    exit 127
+fi
+
+# Without git there is no diff, and reviewing the diff is the point of
+# delegating. Refuse instead of letting the changes go unreviewed.
+if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "ERROR: $PROJECT_DIR is not inside a git repository; run the worker from the repository that will be changed." >&2
+    exit 2
+fi
+
+# Snapshot the working tree before the run so the report shows only what the
+# worker changed, not changes the user already had. `git stash create` writes
+# a commit object without touching the working tree or the stash list.
+BASELINE=""
+if git -C "$PROJECT_DIR" rev-parse --verify -q HEAD >/dev/null; then
+    BASELINE="$(git -C "$PROJECT_DIR" stash create 2>/dev/null || true)"
+    BASELINE="${BASELINE:-$(git -C "$PROJECT_DIR" rev-parse HEAD)}"
+fi
+# Untracked files are not in the snapshot, so hash them to also catch edits
+# the worker makes to files that were already untracked.
+hash_untracked() {
+    local file
+    git -C "$PROJECT_DIR" ls-files -z --others --exclude-standard \
+        | while IFS= read -r -d '' file; do
+            printf '%s %s\n' "$(git -C "$PROJECT_DIR" hash-object -- "$file" 2>/dev/null || echo unreadable)" "$file"
+        done | LC_ALL=C sort
+}
+
+indent() {
+    sed 's/^/  /'
+}
+UNTRACKED_BEFORE="$(hash_untracked)"
+PREEXISTING="$(git -C "$PROJECT_DIR" status --porcelain)"
+
+# Enforced by OpenCode itself, and only for delegated runs. Patterns start with
+# "*" because command-rewriting plugins (e.g. rtk) turn "git commit" into
+# "rtk git commit" before permissions are evaluated.
+DENY_PATTERNS=(
+    "*git commit*"
+    "*git push*"
+    "*git reset*"
+    "*git clean*"
+    "*git checkout*"
+    "*git switch*"
+    "*git restore*"
+    "*git stash*"
+    "*git rebase*"
+    "*git merge*"
+    "*rm -rf*"
+    "*rm -fr*"
+)
+
+# Extra project- or user-specific rules (e.g. "*supabase db reset*"), one
+# shell glob per line; blank lines and lines starting with # are ignored.
+DENY_FILE="${OPENCODE_WORKER_DENY_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/claude-opencode-worker/deny}"
+if [[ -f "$DENY_FILE" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        DENY_PATTERNS+=("$line")
+    done < "$DENY_FILE"
+fi
+
+json_escape() {
+    local s="${1//\\/\\\\}"
+    printf '%s' "${s//\"/\\\"}"
+}
+
+BASH_RULES=""
+for pattern in "${DENY_PATTERNS[@]}"; do
+    BASH_RULES+="${BASH_RULES:+,}
+      \"$(json_escape "$pattern")\": \"deny\""
+done
+
+# shellcheck disable=SC2016
+DEFAULT_CONFIG='{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "external_directory": "deny",
+    "bash": {'"$BASH_RULES"'
+    }
+  }
+}'
+
+if [[ -n "${OPENCODE_CONFIG_CONTENT:-}" ]]; then
+    echo "WARNING: OPENCODE_CONFIG_CONTENT is already set; the worker's deny rules are not applied." >&2
+else
+    export OPENCODE_CONFIG_CONTENT="$DEFAULT_CONFIG"
+fi
+
+if [[ -n "${OPENCODE_WORKER_MODEL:-}" ]]; then
+    MODEL_LABEL="$OPENCODE_WORKER_MODEL"
+else
+    LAST_MODEL="$(python3 -c '
+import json, os, sys
+try:
+    r = json.load(open(os.path.expanduser("~/.local/state/opencode/model.json")))["recent"][0]
+    print(r["providerID"] + "/" + r["modelID"])
+except Exception:
+    pass
+' 2>/dev/null || true)"
+    MODEL_LABEL="OpenCode default (last used: ${LAST_MODEL:-unknown}); set OPENCODE_WORKER_MODEL to pin it"
+fi
+
+PROMPT="You are running as a delegated implementation worker. Leave all changes uncommitted for review. Do not run git commands that commit, push, reset, clean, checkout, switch, restore, stash, rebase or merge; they are denied. Do not edit files outside $PROJECT_DIR. Do not delete directories recursively; that is denied too, as are any extra commands the user configured.
+
+Task:
+$TASK"
+
+echo "=== OpenCode Worker ==="
+echo "Project: $PROJECT_DIR"
+echo "OpenCode: $(opencode --version)"
+echo "Model: $MODEL_LABEL"
+echo "Timeout: ${TIMEOUT}s"
+if [[ -n "$PREEXISTING" ]]; then
+    echo "Pre-existing changes (not the worker's):"
+    indent <<< "$PREEXISTING"
+fi
+echo
+echo "Starting OpenCode..."
+echo
+
+ARGS=(
+    run
+    --dir "$PROJECT_DIR"
+    --agent build
+)
+
+if [[ -n "${OPENCODE_WORKER_MODEL:-}" ]]; then
+    ARGS+=(--model "$OPENCODE_WORKER_MODEL")
+fi
+
+LOG="$(mktemp "${TMPDIR:-/tmp}/opencode-worker.XXXXXX")"
+trap 'rm -f "$LOG"' EXIT
+
+rc=0
+if command -v timeout >/dev/null 2>&1; then
+    timeout -k 15 "$TIMEOUT" opencode "${ARGS[@]}" "$PROMPT" 2>&1 | tee "$LOG" || rc=${PIPESTATUS[0]}
+else
+    opencode "${ARGS[@]}" "$PROMPT" 2>&1 | tee "$LOG" || rc=${PIPESTATUS[0]}
+fi
+
+echo
+echo "=== Worker changes ==="
+if [[ -n "$BASELINE" ]]; then
+    git -C "$PROJECT_DIR" --no-pager diff --stat "$BASELINE" || true
+    echo "Review with: git diff $BASELINE"
+else
+    git -C "$PROJECT_DIR" --no-pager diff --stat || true
+fi
+UNTRACKED_AFTER="$(hash_untracked)"
+NEW_UNTRACKED="$(LC_ALL=C comm -13 <(cut -d' ' -f2- <<< "$UNTRACKED_BEFORE" | LC_ALL=C sort) <(cut -d' ' -f2- <<< "$UNTRACKED_AFTER" | LC_ALL=C sort) | sed '/^$/d')"
+CHANGED_UNTRACKED="$(LC_ALL=C comm -13 <(echo "$UNTRACKED_BEFORE") <(echo "$UNTRACKED_AFTER") | cut -d' ' -f2- | grep -vxF -f <(printf '%s\n' "$NEW_UNTRACKED") | sed '/^$/d' || true)"
+if [[ -n "$NEW_UNTRACKED" ]]; then
+    echo "New untracked files:"
+    indent <<< "$NEW_UNTRACKED"
+fi
+if [[ -n "$CHANGED_UNTRACKED" ]]; then
+    echo "Already-untracked files the worker changed (not in git diff):"
+    indent <<< "$CHANGED_UNTRACKED"
+fi
+
+if [[ $rc -eq 124 ]]; then
+    echo >&2
+    echo "ERROR: OpenCode timed out after ${TIMEOUT}s. Changes may be partial." >&2
+    exit 124
+fi
+
+# "auto-rejecting" comes from permissions set to ask; the other message comes
+# from the deny rules above. Both leave the task possibly incomplete.
+REJECTED="$(grep -a -E 'auto-rejecting|prevents you from using this specific tool call' "$LOG" | cut -c1-200 || true)"
+if [[ -n "$REJECTED" ]]; then
+    echo >&2
+    echo "ERROR: OpenCode hit denied or auto-rejected permissions; the task may be incomplete:" >&2
+    indent <<< "$REJECTED" >&2
+    [[ $rc -eq 0 ]] && rc=3
+fi
+
+exit "$rc"

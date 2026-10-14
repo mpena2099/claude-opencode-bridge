@@ -4,10 +4,11 @@ set -euo pipefail
 
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_SKILL="$REPO_DIR/skills/delegate-to-opencode/SKILL.md"
-SOURCE_WORKER="$REPO_DIR/bin/claude-opencode-worker"
+SOURCE_WORKER="$REPO_DIR/skills/delegate-to-opencode/scripts/claude-opencode-worker"
 
 TARGET_SKILL="$HOME/.claude/skills/delegate-to-opencode/SKILL.md"
-TARGET_WORKER="$HOME/.local/bin/claude-opencode-worker"
+TARGET_WORKER="$HOME/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker"
+LEGACY_WORKER="$HOME/.local/bin/claude-opencode-worker"
 
 fail() {
     echo "FAIL: $1" >&2
@@ -19,6 +20,10 @@ fail() {
 
 cmp -s "$SOURCE_SKILL" "$TARGET_SKILL" || fail "Installed skill differs from the repository; run ./install.sh"
 cmp -s "$SOURCE_WORKER" "$TARGET_WORKER" || fail "Installed worker differs from the repository; run ./install.sh"
+
+if [[ -e "$LEGACY_WORKER" || -L "$LEGACY_WORKER" ]]; then
+    fail "Legacy worker still exists: $LEGACY_WORKER"
+fi
 
 # Collapse whitespace so line wrapping in the YAML description does not matter.
 FLAT_SKILL="$(tr -s '[:space:]' ' ' < "$SOURCE_SKILL")"
