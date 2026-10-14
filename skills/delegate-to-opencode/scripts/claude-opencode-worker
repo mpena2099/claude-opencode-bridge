@@ -204,9 +204,10 @@ fi
 
 # A new session is found again by its unique title, so a later review can
 # resume it with OPENCODE_WORKER_SESSION.
-if [[ -z "$SESSION" ]]; then
-    SESSION="$(cd "$PROJECT_DIR" && timeout 20 opencode session list --format json -n 20 2>/dev/null \
-        | RUN_TITLE="$RUN_TITLE" python3 -c '
+find_session_by_title() {
+    local sessions
+    sessions="$(cd "$PROJECT_DIR" && timeout 20 opencode session list --format json -n 20 2>/dev/null)" || return 0
+    RUN_TITLE="$RUN_TITLE" python3 -c '
 import json, os, sys
 try:
     for s in json.load(sys.stdin):
@@ -215,7 +216,11 @@ try:
             break
 except Exception:
     pass
-' 2>/dev/null || true)"
+' <<< "$sessions" 2>/dev/null || true
+}
+
+if [[ -z "$SESSION" ]] && command -v timeout >/dev/null 2>&1; then
+    SESSION="$(find_session_by_title)"
 fi
 
 echo
