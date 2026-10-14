@@ -90,18 +90,15 @@ Both place:
 
 ### Choosing the model
 
-List the models you allow for delegated work in `~/.config/claude-opencode-worker/models`, one per line, with an optional note on when to use each. The first one is the default.
+The worker does not pick a model: OpenCode uses its own default, so you change the delegated model where you already choose models, in OpenCode (or pin one with `"model"` in `opencode.jsonc`). The worker prints the model OpenCode used last so you can see it.
 
-```text
-# Mechanical work: renames, tests that follow a pattern
-opencode/mimo-v2.6-flash-free  # fast
-# Trickier logic
-opencode/muse-spark-1.3-contributor-free
+When you ask Claude for a specific model, the skill passes it as `OPENCODE_WORKER_MODEL`:
+
+```bash
+export OPENCODE_WORKER_MODEL='provider/model'
 ```
 
-The skill tells Claude to pick per task from this list and pass it as `OPENCODE_WORKER_MODEL`, and to ask you before the first delegation if the file does not exist, instead of guessing from the hundreds of entries in `opencode models`, most of them billed per token. Before dispatching, the worker refuses (exit 2) a model that is not in the list or that OpenCode no longer offers, which happens often with free models. Another path can be set with `OPENCODE_WORKER_MODELS_FILE`. Without a list and without `OPENCODE_WORKER_MODEL`, OpenCode uses its own default and the worker prints the model used last.
-
-A resumed session keeps its model unless `OPENCODE_WORKER_MODEL` is set.
+Before dispatching, the worker checks that model against `opencode models` and refuses it (exit 2) if OpenCode no longer offers it, which happens often with free models. The skill tells Claude never to choose a model on its own, since most entries in `opencode models` are billed per token. A resumed session keeps its model unless `OPENCODE_WORKER_MODEL` is set.
 
 ### Timeout
 
@@ -145,7 +142,7 @@ The worker finds the session id by giving each new run a unique title, and pins 
 | Code | Meaning |
 |---|---|
 | 0 | OpenCode finished and no permission was denied |
-| 2 | Usage error, not inside a git repository, or a model that is not allowed or no longer available; nothing ran |
+| 2 | Usage error, not inside a git repository, or a requested model that OpenCode does not offer; nothing ran |
 | 3 | OpenCode finished, but a permission was denied or auto-rejected; the task may be incomplete |
 | 124 | Timeout; changes may be partial |
 | 127 | `opencode` not found |

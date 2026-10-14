@@ -4,8 +4,8 @@ set -euo pipefail
 
 # Exit codes:
 #   0    OpenCode finished and no permission was auto-rejected
-#   2    usage error, not inside a git repository, or a model that is not
-#        allowed or not available
+#   2    usage error, not inside a git repository, or a requested model that
+#        OpenCode does not offer
 #   3    OpenCode finished but a permission was denied or auto-rejected
 #   124  OpenCode timed out; changes may be partial
 #   127  opencode not found
@@ -140,42 +140,15 @@ if [[ -n "$SESSION" && ! "$SESSION" =~ ^ses_[A-Za-z0-9]+$ ]]; then
     echo "ERROR: OPENCODE_WORKER_SESSION must be an OpenCode session id (ses_...)." >&2
     exit 2
 fi
-# Models the user allows for delegated work, one "provider/model" per line,
-# optionally followed by a "# note" on when to use it. The first one is the
-# default. Only the user knows which models are free or flat-rate for them,
-# so the worker never picks one outside this list.
-MODELS_FILE="${OPENCODE_WORKER_MODELS_FILE:-$CONFIG_DIR/models}"
-ALLOWED_MODELS=()
-if [[ -f "$MODELS_FILE" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%%#*}"
-        read -r line _ <<< "$line" || true
-        [[ -n "$line" ]] && ALLOWED_MODELS+=("$line")
-    done < "$MODELS_FILE"
-fi
-
+# Without an explicit model OpenCode uses its own default; the worker only
+# passes one when the user asked for a specific model.
 MODEL="${OPENCODE_WORKER_MODEL:-}"
-# A resumed session keeps its own model unless one is given explicitly.
-if [[ -z "$MODEL" && -z "$SESSION" && ${#ALLOWED_MODELS[@]} -gt 0 ]]; then
-    MODEL="${ALLOWED_MODELS[0]}"
-fi
-
-if [[ -n "$MODEL" && ${#ALLOWED_MODELS[@]} -gt 0 ]]; then
-    allowed=0
-    for candidate in "${ALLOWED_MODELS[@]}"; do
-        [[ "$candidate" == "$MODEL" ]] && allowed=1
-    done
-    if [[ $allowed -eq 0 ]]; then
-        echo "ERROR: model $MODEL is not in $MODELS_FILE. Allowed: ${ALLOWED_MODELS[*]}" >&2
-        exit 2
-    fi
-fi
 
 # Free models come and go; fail before dispatching instead of mid-run.
 if [[ -n "$MODEL" ]]; then
     if AVAILABLE_MODELS="$(opencode models 2>/dev/null)"; then
         if ! grep -Fxq -- "$MODEL" <<< "$AVAILABLE_MODELS"; then
-            echo "ERROR: model $MODEL is not available in OpenCode (see 'opencode models'); update $MODELS_FILE or OPENCODE_WORKER_MODEL." >&2
+            echo "ERROR: model $MODEL is not available in OpenCode (see 'opencode models')." >&2
             exit 2
         fi
     else
@@ -196,7 +169,7 @@ try:
 except Exception:
     pass
 ' 2>/dev/null || true)"
-    MODEL_LABEL="OpenCode default (last used: ${LAST_MODEL:-unknown}); list allowed models in $MODELS_FILE"
+    MODEL_LABEL="OpenCode default (last used: ${LAST_MODEL:-unknown})"
 fi
 
 RUN_TITLE="claude-opencode-worker $(date +%Y%m%dT%H%M%S)-$$-$RANDOM"

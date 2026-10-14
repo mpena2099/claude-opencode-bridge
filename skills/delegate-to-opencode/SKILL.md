@@ -17,7 +17,7 @@ compatibility: >-
   used to report the model and find the OpenCode session, and the worker
   still runs without it.
 metadata:
-  version: 1.5.0
+  version: 1.6.0
 ---
 
 # Delegate to OpenCode
@@ -60,22 +60,12 @@ several sequential delegations and review each one before sending the next.
 
 ## Choosing the model
 
-The user lists the models allowed for delegated work in
-`~/.config/claude-opencode-worker/models`, one `provider/model` per line,
-optionally followed by `# when to use it`. Only the user knows which models
-are free or flat-rate for them; `opencode models` lists hundreds, most billed
-per token.
-
-- Read that file before delegating. Pick per task from that list: a fast,
-  cheap model for mechanical sweeps; the strongest listed one for subtle
-  logic. Pass it as `OPENCODE_WORKER_MODEL=provider/model`. With no variable
-  the worker uses the first listed model.
-- The worker refuses (exit 2) a model that is not in the list or that
-  OpenCode no longer offers. Free models disappear often; when that happens,
-  tell the user which one is gone instead of picking a replacement yourself.
-- If the file does not exist, ask the user which models to use before the
-  first delegation, and offer to create the file. Do not guess from
-  `opencode models`.
+Do not pass a model by default: OpenCode then uses its own default model,
+which the user controls in OpenCode. Only when the user asks for a specific
+model, pass it as `OPENCODE_WORKER_MODEL=provider/model` for the runs they
+meant. Never choose a model on your own: most entries in `opencode models`
+are billed per token. If the worker reports that the requested model is not
+available, tell the user instead of picking a replacement.
 
 ## Delegation workflow
 
@@ -107,8 +97,8 @@ per token.
    - `3`: finished, but a permission was denied or auto-rejected; the output
      lists which. The task may be incomplete.
    - `124`: timed out; changes may be partial.
-   - `2`: usage error, not inside a git repository, or a model that is not
-     allowed or no longer available; nothing ran.
+   - `2`: usage error, not inside a git repository, or a requested model that
+     OpenCode does not offer; nothing ran.
 5. Treat OpenCode's output as an implementation attempt, not as final approval.
 6. Inspect the diff yourself. The worker ends with a `Worker changes` section
    and a `git diff <baseline>` command that shows only what OpenCode changed,
