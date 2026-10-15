@@ -158,8 +158,24 @@ OpenCode then runs its `plan` agent with file edits denied and bash limited to c
 | 2 | Usage error, not inside a git repository, or a requested model that OpenCode does not offer; nothing ran |
 | 3 | OpenCode finished, but a permission was denied or auto-rejected; the task may be incomplete |
 | 4 | A read-only run changed the working tree |
+| 5 | A file changed inside a directory shared through `OPENCODE_WORKER_READ_DIRS` |
 | 124 | Timeout; changes may be partial |
 | 127 | `opencode` not found |
+
+### Short report, full log on disk
+
+The point of delegating is to make the Claude session cost less, and Claude pays for every line the worker prints. The worker runs OpenCode with `--format json`, keeps the full transcript and stderr in `~/.local/state/claude-opencode-worker/` (deleted after 7 days; `OPENCODE_WORKER_LOG_DIR` changes the place) and prints only:
+
+- OpenCode's final answer, capped at 3000 characters (12000 in read mode; `OPENCODE_WORKER_ANSWER_CHARS` changes it);
+- a one-line count of the tools it used, and the failed and denied tool calls;
+- OpenCode's token usage;
+- the path of the full log.
+
+A typical edit run now reports in under 1000 characters, where the old streamed transcript ran to tens of thousands. `OPENCODE_WORKER_VERBOSE=1` adds the transcript back, for debugging the worker.
+
+### Files outside the project
+
+OpenCode cannot open files outside the project, so a task about a doc in a sibling repository used to paste the doc in, or OpenCode guessed. `OPENCODE_WORKER_READ_DIRS` takes colon-separated absolute directories that OpenCode may read; the prompt tells it never to edit them, and the worker exits 5 if any file in them changed during the run.
 
 ### Report of what changed
 

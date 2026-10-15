@@ -50,6 +50,9 @@ printf '%s' "${OPENCODE_CONFIG_CONTENT:-}" > "$STUB_OUT/config"
 if [[ -n "${STUB_PRINT:-}" ]]; then
     echo "$STUB_PRINT"
 fi
+if [[ -n "${STUB_EVENTS:-}" ]]; then
+    cat "$STUB_EVENTS"
+fi
 if [[ -n "${STUB_ACTION:-}" ]]; then
     bash -c "$STUB_ACTION"
 fi
@@ -63,8 +66,9 @@ chmod +x "$TMP/bin/opencode"
 export PATH="$TMP/bin:$PATH"
 export STUB_OUT="$TMP/out"
 export OPENCODE_WORKER_DENY_FILE="$TMP/no-deny-file"
+export OPENCODE_WORKER_LOG_DIR="$TMP/logs"
 unset OPENCODE_CONFIG_CONTENT OPENCODE_WORKER_MODEL OPENCODE_WORKER_TIMEOUT
-unset STUB_PRINT STUB_ACTION STUB_EXIT STUB_SLEEP
+unset STUB_PRINT STUB_ACTION STUB_EXIT STUB_SLEEP STUB_EVENTS OPENCODE_WORKER_READ_DIRS OPENCODE_WORKER_VERBOSE
 
 fail() {
     echo "FAIL: $1" >&2
@@ -287,5 +291,59 @@ if grep -Fxq -- '--model' "$TMP/out/args"; then
     fail "resume should not pass --model"
 fi
 grep -Fq "resumed session's model" "$TMP/out-models-resume" || fail "resume model label missing"
+
+# JSON events: only the final answer reaches stdout, with tools and tokens;
+# the transcript stays in the log file.
+cat > "$TMP/events.jsonl" <<'EOF'
+{"type":"step_start","sessionID":"ses_JSON42","part":{"type":"step-start"}}
+{"type":"text","sessionID":"ses_JSON42","part":{"type":"text","text":"INTERMEDIATE-NARRATION"}}
+{"type":"tool_use","sessionID":"ses_JSON42","part":{"type":"tool","tool":"read","state":{"status":"completed","input":{"filePath":"/x/a.ts"},"output":"Error: The user has specified a rule which prevents you QUOTED-IN-FILE"}}}
+{"type":"tool_use","sessionID":"ses_JSON42","part":{"type":"tool","tool":"bash","state":{"status":"error","input":{"command":"npm test"},"error":"exit 1: tests failed"}}}
+{"type":"step_finish","sessionID":"ses_JSON42","part":{"type":"step-finish","tokens":{"input":100,"output":20,"cache":{"read":300}}}}
+{"type":"text","sessionID":"ses_JSON42","part":{"type":"text","text":"FINAL-ANSWER: changed a.ts"}}
+{"type":"step_finish","sessionID":"ses_JSON42","part":{"type":"step-finish","tokens":{"input":5,"output":7,"cache":{"read":1}}}}
+EOF
+rc=0; STUB_SESSIONS='[]' STUB_EVENTS="$TMP/events.jsonl" run_worker "task" > "$TMP/out-json" 2> "$TMP/err-json" || rc=$?
+[[ $rc -eq 0 ]] || fail "json run should exit 0 (quoted deny text in tool output is not a hit), got $rc"
+grep -Fxq -- '--format' "$TMP/out/args" || fail "--format json missing"
+grep -Fq 'FINAL-ANSWER: changed a.ts' "$TMP/out-json" || fail "final answer missing"
+if grep -Fq 'INTERMEDIATE-NARRATION' "$TMP/out-json"; then
+    fail "intermediate text should stay out of stdout"
+fi
+grep -Fq 'Tools: bash x1, read x1' "$TMP/out-json" || fail "tool count missing"
+grep -Fq 'bash npm test: exit 1: tests failed' "$TMP/out-json" || fail "failed tool call missing"
+grep -Fq 'OpenCode tokens: input 105, output 27, cache read 301' "$TMP/out-json" || fail "token usage missing"
+grep -Fq 'Session: ses_JSON42' "$TMP/out-json" || fail "session id from events missing"
+LOGFILE="$(sed -n 's/^Full log: //p' "$TMP/out-json")"
+grep -Fq 'INTERMEDIATE-NARRATION' "$LOGFILE" || fail "full log should keep the transcript"
+
+# Verbose mode prints the transcript too.
+STUB_SESSIONS='[]' STUB_EVENTS="$TMP/events.jsonl" OPENCODE_WORKER_VERBOSE=1 run_worker "task" > "$TMP/out-verbose" || fail "verbose run failed"
+grep -Fq 'INTERMEDIATE-NARRATION' "$TMP/out-verbose" || fail "verbose transcript missing"
+
+# The final answer is capped.
+STUB_SESSIONS='[]' STUB_EVENTS="$TMP/events.jsonl" OPENCODE_WORKER_ANSWER_CHARS=5 run_worker "task" > "$TMP/out-cap" || fail "capped run failed"
+grep -Fq 'answer cut at 5 characters' "$TMP/out-cap" || fail "answer cap note missing"
+
+# A denied tool call inside the JSON events exits 3.
+cat > "$TMP/events-denied.jsonl" <<'EOF'
+{"type":"tool_use","sessionID":"ses_D","part":{"type":"tool","tool":"read","state":{"status":"error","input":{"filePath":"/outside/doc.md"},"error":"The user has specified a rule which prevents you from using this specific tool call."}}}
+{"type":"text","sessionID":"ses_D","part":{"type":"text","text":"done anyway"}}
+EOF
+rc=0; STUB_SESSIONS='[]' STUB_EVENTS="$TMP/events-denied.jsonl" run_worker "task" > /dev/null 2> "$TMP/err-denied" || rc=$?
+[[ $rc -eq 3 ]] || fail "denied tool call in events should exit 3, got $rc"
+grep -Fq '/outside/doc.md' "$TMP/err-denied" || fail "denied tool target missing"
+
+# Read dirs: allowed in the config, named in the prompt, and edits there exit 5.
+mkdir -p "$TMP/docs"
+echo doc > "$TMP/docs/ref.md"
+OPENCODE_WORKER_READ_DIRS="$TMP/docs" run_worker "task" > /dev/null || fail "read dirs run failed"
+python3 -c 'import json,sys; c=json.load(open(sys.argv[1]))["permission"]["external_directory"]; assert c[sys.argv[2] + "/*"] == "allow" and c["*"] == "deny"' "$TMP/out/config" "$TMP/docs" || fail "read dir allow rule missing"
+grep -Fq "never edit, these directories outside the project: $TMP/docs" "$TMP/out/args" || fail "read dirs prompt note missing"
+rc=0; OPENCODE_WORKER_READ_DIRS="$TMP/docs" STUB_ACTION="sleep 1; echo changed > '$TMP/docs/ref.md'" run_worker "task" > /dev/null 2> "$TMP/err-readdir" || rc=$?
+[[ $rc -eq 5 ]] || fail "edit in read dir should exit 5, got $rc"
+grep -Fq 'ref.md' "$TMP/err-readdir" || fail "changed read-dir file missing from error"
+rc=0; OPENCODE_WORKER_READ_DIRS="relative/path" run_worker "task" > /dev/null 2>&1 || rc=$?
+[[ $rc -eq 2 ]] || fail "relative read dir should exit 2, got $rc"
 
 echo "PASS: worker behaves as expected."
