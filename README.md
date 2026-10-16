@@ -51,7 +51,9 @@ The worker is validated with OpenCode `2.0.31` and still supports OpenCode 1.x. 
 - `skills/delegate-to-opencode/scripts/claude-opencode-worker`: wrapper that launches OpenCode with a timeout, deny rules and a report of what changed.
 - `skills/delegate-to-opencode/references/review-checklist.md`: what the main session checks in every delegated diff.
 - `skills/delegate-to-opencode/references/worker.md`: exit codes, report, read mode, session resume and other worker details, loaded only when needed.
-- `install.sh`: installs the skill folder into `~/.claude/skills/`.
+- `commands/delegate.md`: the `/delegate` command, the same flow as the skill without the turn to load it.
+- `bench/`: tasks and scripts that measure the Opus cost of delegating.
+- `install.sh`: installs the skill folder into `~/.claude/skills/` and the command into `~/.claude/commands/`.
 - `uninstall.sh`: removes the installed files while creating a timestamped backup first.
 - `tests/test-install.sh`: verifies the installed files match the repository and checks basic metadata.
 - `tests/test-worker.sh`: exercises the worker against a stub `opencode`, without calling any model.
@@ -79,6 +81,7 @@ Both place:
 ~/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker
 ~/.claude/skills/delegate-to-opencode/references/review-checklist.md
 ~/.claude/skills/delegate-to-opencode/references/worker.md
+~/.claude/commands/delegate.md
 ```
 
 `install.sh` creates a timestamped backup if a target file already exists, and removes the `~/.local/bin/claude-opencode-worker` left by versions before 1.3.0 (after backing it up).
@@ -191,10 +194,14 @@ Fresh `claude -p` Opus 5.5 sessions on the same task, OpenCode 2.0.31 with `muse
 
 | Task | Opus alone | Delegated | Quality |
 |---|---|---|---|
-| Write a unittest suite for a 10-function module | $0.42 to $0.45 (4 runs) | $0.31 (2 runs), about 30% less | Opus: 68 to 91 tests, 10/10 planted bugs caught. Delegated: 49 to 56 tests, 8 to 9/10 |
+| Write a unittest suite for a 10-function module | $0.42 to $0.48 (6 runs) | Skill: $0.31 (2 runs), about 30% less. `/delegate`: $0.30 to $0.32 (2 runs), about 35% less | Opus: 68 to 91 tests, 10/10 planted bugs caught. `/delegate`, with the edge cases named in `Done when`: 90 to 98 tests, 9 to 10/10. Skill before that change: 49 to 56 tests, 8 to 9/10 |
 | Replace `print` with `logging` in 12 modules | $0.35 to $0.38 (4 runs) | $0.35 (2 runs) | Both correct; Opus solved it with a short script, so there was nothing to save |
 
-About $0.25 to $0.30 of each session is the fixed start-up context (system prompt, skill list, `CLAUDE.md`), which delegating cannot reduce. In these runs Opus did not pick the skill on its own; it delegated when the prompt asked for the skill.
+About $0.25 to $0.30 of each session is the fixed start-up context (system prompt, skill list, `CLAUDE.md`), which delegating cannot reduce. In these runs Opus did not pick the skill on its own; it delegated when the prompt asked for the skill or came through `/delegate`. `bench/` holds the tasks and scripts to repeat these measurements.
+
+### `/delegate`
+
+`/delegate <task>` (installed to `~/.claude/commands/delegate.md`) carries the same flow as the skill in a few lines. A command is expanded into your message, so it also saves the turn Claude spends loading the skill, and you decide when to delegate instead of waiting for Claude to pick the skill.
 
 ### Files outside the project
 

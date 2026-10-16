@@ -16,7 +16,7 @@ compatibility: >-
   Built for Claude Code. Requires the opencode CLI, git and bash; python3 is
   used to summarize OpenCode's output, and the worker still runs without it.
 metadata:
-  version: 1.10.0
+  version: 1.11.0
 ---
 
 # Delegate to OpenCode
@@ -28,8 +28,8 @@ only when OpenCode writes much more than the delegation costs you:
 - **Worth it:** you would otherwise write a lot of new code yourself (roughly
   150+ lines), and a command can check it (tests pass, build succeeds) or a
   skim of the diff can. A delegated test suite costs about 30% fewer Opus
-  tokens than writing it, but tends to be smaller: put the cases that matter
-  in `Done when`.
+  tokens than writing it, but tends to be smaller unless `Done when` names
+  the cases that matter.
 - **Not worth it either:** a change you can make with a short script or a
   `sed` over many files. Writing the script costs less than the delegation.
 - **Not worth it:** small changes, code you will read line by line anyway
@@ -58,7 +58,8 @@ roughly as much as writing a few hundred tokens of code.
    Do not touch: <files or behaviour that must stay as they are>
    Rules: <project rules from memory or this conversation that apply>
    Size: <a cap, e.g. "at most 300 lines">
-   Done when: <observable result>
+   Done when: <observable result; for tests, the cases each function must
+     cover: boundaries, empty input, every error path>
    TASK
    ```
 

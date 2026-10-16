@@ -1,6 +1,6 @@
 Claude Code → OpenCode Delegation Bridge
 
-Project version: 1.10.0
+Project version: 1.11.0
 Validated Claude Code version: 2.1.299
 Validated OpenCode version: 2.0.31 (1.x still supported)
 Validated delegated model: muse-spark-1.3-contributor-free
@@ -20,9 +20,11 @@ Validated behavior:
 - skills CLI (`npx skills add`) discovers the skill and copies scripts/ with the executable bit.
 - Worker on OpenCode 2: runs with --standalone so deny rules from OPENCODE_CONFIG_CONTENT apply (the default background service ignores them); edit run, deny of git commit, session lookup by title and session resume all worked; deny hits (`Permission denied: shell`) and auto-rejects exit 3.
 - Worker 1.10.0 (OPENCODE_WORKER_CHECK, inline diff, short SKILL.md): delegated Opus sessions went skill -> one worker call -> one review command -> answer; a test-suite task cost about 30% less than Opus alone, a scriptable 12-module change cost the same.
+- /delegate command: textkit task delegated through `claude -p "/delegate ..."` cost $0.30 to $0.32 against $0.47 to $0.48 for Opus alone in the same batch, with 90 to 98 tests catching 9 to 10 of 10 planted bugs.
 
 Installed paths:
 - ~/.claude/skills/delegate-to-opencode/SKILL.md
 - ~/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker
 - ~/.claude/skills/delegate-to-opencode/references/review-checklist.md
 - ~/.claude/skills/delegate-to-opencode/references/worker.md
+- ~/.claude/commands/delegate.md

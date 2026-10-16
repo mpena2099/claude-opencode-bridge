@@ -7,11 +7,13 @@ SOURCE_SKILL="$SCRIPT_DIR/skills/delegate-to-opencode/SKILL.md"
 SOURCE_WORKER="$SCRIPT_DIR/skills/delegate-to-opencode/scripts/claude-opencode-worker"
 SOURCE_CHECKLIST="$SCRIPT_DIR/skills/delegate-to-opencode/references/review-checklist.md"
 SOURCE_REFERENCE="$SCRIPT_DIR/skills/delegate-to-opencode/references/worker.md"
+SOURCE_COMMAND="$SCRIPT_DIR/commands/delegate.md"
 
 TARGET_SKILL="$HOME/.claude/skills/delegate-to-opencode/SKILL.md"
 TARGET_WORKER="$HOME/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker"
 TARGET_CHECKLIST="$HOME/.claude/skills/delegate-to-opencode/references/review-checklist.md"
 TARGET_REFERENCE="$HOME/.claude/skills/delegate-to-opencode/references/worker.md"
+TARGET_COMMAND="$HOME/.claude/commands/delegate.md"
 LEGACY_WORKER="$HOME/.local/bin/claude-opencode-worker"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
@@ -30,6 +32,7 @@ backup_if_exists "$TARGET_SKILL"
 backup_if_exists "$TARGET_WORKER"
 backup_if_exists "$TARGET_CHECKLIST"
 backup_if_exists "$TARGET_REFERENCE"
+backup_if_exists "$TARGET_COMMAND"
 
 mkdir -p "$(dirname "$TARGET_SKILL")" "$(dirname "$TARGET_WORKER")" "$(dirname "$TARGET_CHECKLIST")"
 
@@ -37,6 +40,8 @@ install -m 0644 "$SOURCE_SKILL" "$TARGET_SKILL"
 install -m 0755 "$SOURCE_WORKER" "$TARGET_WORKER"
 install -m 0644 "$SOURCE_CHECKLIST" "$TARGET_CHECKLIST"
 install -m 0644 "$SOURCE_REFERENCE" "$TARGET_REFERENCE"
+mkdir -p "$(dirname "$TARGET_COMMAND")"
+install -m 0644 "$SOURCE_COMMAND" "$TARGET_COMMAND"
 
 if [[ -e "$LEGACY_WORKER" || -L "$LEGACY_WORKER" ]]; then
     backup_if_exists "$LEGACY_WORKER"
@@ -50,6 +55,7 @@ echo "Skill:  $TARGET_SKILL"
 echo "Worker: $TARGET_WORKER"
 echo "Checklist: $TARGET_CHECKLIST"
 echo "Reference: $TARGET_REFERENCE"
+echo "Command:   $TARGET_COMMAND (/delegate)"
 if [[ -d "$BACKUP_DIR" ]]; then
     echo "Backup: $BACKUP_DIR"
 fi

@@ -1,0 +1,1 @@
+Write a unittest test suite in test_textkit.py covering every function in textkit.py, including edge cases and error paths (ValueError). Aim for thorough coverage: several cases per function. Run it with `python3 -m unittest -v` and make sure it passes. Do not change textkit.py. Do not commit.
