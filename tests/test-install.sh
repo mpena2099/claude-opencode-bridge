@@ -6,10 +6,12 @@ REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_SKILL="$REPO_DIR/skills/delegate-to-opencode/SKILL.md"
 SOURCE_WORKER="$REPO_DIR/skills/delegate-to-opencode/scripts/claude-opencode-worker"
 SOURCE_CHECKLIST="$REPO_DIR/skills/delegate-to-opencode/references/review-checklist.md"
+SOURCE_REFERENCE="$REPO_DIR/skills/delegate-to-opencode/references/worker.md"
 
 TARGET_SKILL="$HOME/.claude/skills/delegate-to-opencode/SKILL.md"
 TARGET_WORKER="$HOME/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker"
 TARGET_CHECKLIST="$HOME/.claude/skills/delegate-to-opencode/references/review-checklist.md"
+TARGET_REFERENCE="$HOME/.claude/skills/delegate-to-opencode/references/worker.md"
 LEGACY_WORKER="$HOME/.local/bin/claude-opencode-worker"
 
 fail() {
@@ -20,10 +22,12 @@ fail() {
 [[ -f "$TARGET_SKILL" ]] || fail "Missing skill: $TARGET_SKILL"
 [[ -x "$TARGET_WORKER" ]] || fail "Missing or non-executable worker: $TARGET_WORKER"
 [[ -f "$TARGET_CHECKLIST" ]] || fail "Missing checklist: $TARGET_CHECKLIST"
+[[ -f "$TARGET_REFERENCE" ]] || fail "Missing reference: $TARGET_REFERENCE"
 
 cmp -s "$SOURCE_SKILL" "$TARGET_SKILL" || fail "Installed skill differs from the repository; run ./install.sh"
 cmp -s "$SOURCE_WORKER" "$TARGET_WORKER" || fail "Installed worker differs from the repository; run ./install.sh"
 cmp -s "$SOURCE_CHECKLIST" "$TARGET_CHECKLIST" || fail "Installed checklist differs from the repository; run ./install.sh"
+cmp -s "$SOURCE_REFERENCE" "$TARGET_REFERENCE" || fail "Installed reference differs from the repository; run ./install.sh"
 
 if [[ -e "$LEGACY_WORKER" || -L "$LEGACY_WORKER" ]]; then
     fail "Legacy worker still exists: $LEGACY_WORKER"

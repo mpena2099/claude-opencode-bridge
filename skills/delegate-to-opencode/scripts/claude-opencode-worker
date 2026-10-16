@@ -10,6 +10,7 @@ set -euo pipefail
 #   4    a read-only run (OPENCODE_WORKER_MODE=read) changed the working tree
 #   5    a file changed inside a directory shared read-only through
 #        OPENCODE_WORKER_READ_DIRS
+#   6    the check command in OPENCODE_WORKER_CHECK failed
 #   124  OpenCode timed out; changes may be partial
 #   127  opencode not found
 #   other  OpenCode's own exit code
@@ -498,6 +499,34 @@ if [[ -n "$CHANGED_UNTRACKED" ]]; then
     indent <<< "$CHANGED_UNTRACKED"
 fi
 
+# Printing a small diff here saves the caller a separate turn to read it, and
+# every turn re-reads the caller's whole context. Larger diffs are left to a
+# targeted read.
+DIFF_LINES="${OPENCODE_WORKER_DIFF_LINES:-150}"
+if [[ "$MODE" == edit && "$DIFF_LINES" =~ ^[0-9]+$ && $DIFF_LINES -gt 0 ]]; then
+    FULL_DIFF="$(
+        if [[ -n "$BASELINE" ]]; then
+            git -C "$PROJECT_DIR" --no-pager diff --no-color "$BASELINE" 2>/dev/null || true
+        else
+            git -C "$PROJECT_DIR" --no-pager diff --no-color 2>/dev/null || true
+        fi
+        while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            (cd "$PROJECT_DIR" && git --no-pager diff --no-color --no-index -- /dev/null "$file" 2>/dev/null) || true
+        done <<< "$NEW_UNTRACKED"
+    )"
+    if [[ -n "$FULL_DIFF" ]]; then
+        FULL_DIFF_COUNT="$(wc -l <<< "$FULL_DIFF")"
+        if [[ $FULL_DIFF_COUNT -le $DIFF_LINES ]]; then
+            echo "--- Diff ($FULL_DIFF_COUNT lines) ---"
+            printf '%s\n' "$FULL_DIFF"
+            echo "--- End of diff ---"
+        else
+            echo "Diff is $FULL_DIFF_COUNT lines, over OPENCODE_WORKER_DIFF_LINES=$DIFF_LINES; not printed."
+        fi
+    fi
+fi
+
 if [[ -n "$SESSION" ]]; then
     echo
     echo "Session: $SESSION"
@@ -550,5 +579,29 @@ for dir in "${READ_DIRS[@]}"; do
         rc=5
     fi
 done
+
+# Running the caller's check here saves it a separate turn. It runs last, after
+# the change report, so files the check creates (caches, build output) are not
+# reported as the worker's changes.
+CHECK="${OPENCODE_WORKER_CHECK:-}"
+if [[ -n "$CHECK" && "$MODE" == edit && $rc -ne 124 ]]; then
+    CHECK_TIMEOUT="${OPENCODE_WORKER_CHECK_TIMEOUT:-300}"
+    CHECK_OUT="$SUMMARY_DIR/check"
+    check_rc=0
+    if command -v timeout >/dev/null 2>&1; then
+        (cd "$PROJECT_DIR" && timeout -k 10 "$CHECK_TIMEOUT" bash -c "$CHECK") > "$CHECK_OUT" 2>&1 || check_rc=$?
+    else
+        (cd "$PROJECT_DIR" && bash -c "$CHECK") > "$CHECK_OUT" 2>&1 || check_rc=$?
+    fi
+    echo
+    if [[ $check_rc -eq 0 ]]; then
+        echo "=== Check passed: $CHECK ==="
+        tail -n 5 "$CHECK_OUT" | cut -c1-300
+    else
+        echo "=== Check FAILED (exit $check_rc): $CHECK ==="
+        tail -n 30 "$CHECK_OUT" | cut -c1-300
+        [[ $rc -eq 0 ]] && rc=6
+    fi
+fi
 
 exit "$rc"

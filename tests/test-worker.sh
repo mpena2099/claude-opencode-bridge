@@ -365,4 +365,26 @@ grep -Fq 'ref.md' "$TMP/err-readdir" || fail "changed read-dir file missing from
 rc=0; OPENCODE_WORKER_READ_DIRS="relative/path" run_worker "task" > /dev/null 2>&1 || rc=$?
 [[ $rc -eq 2 ]] || fail "relative read dir should exit 2, got $rc"
 
+# A small diff is printed inline, including new files; a large one is not.
+rc=0; STUB_ACTION='printf "one\ntwo\n" > inline-new.txt' run_worker "task" > "$TMP/out-diff" 2>&1 || rc=$?
+grep -Fq -- '--- Diff (' "$TMP/out-diff" || fail "small diff should be printed"
+grep -Fq '+two' "$TMP/out-diff" || fail "new file content missing from inline diff"
+rm -f "$TMP/repo/inline-new.txt"
+OPENCODE_WORKER_DIFF_LINES=3 STUB_ACTION='seq 1 50 > inline-big.txt' run_worker "task" > "$TMP/out-diff" 2>&1 || true
+grep -Fq 'over OPENCODE_WORKER_DIFF_LINES=3; not printed' "$TMP/out-diff" || fail "large diff should not be printed"
+if grep -Fq -- '--- Diff (' "$TMP/out-diff"; then fail "large diff was printed"; fi
+rm -f "$TMP/repo/inline-big.txt"
+
+# The check command runs after the run; a failure exits 6 and its artifacts are not reported as changes.
+OPENCODE_WORKER_CHECK='echo all-good; touch check-artifact.txt' run_worker "task" > "$TMP/out-check" 2>&1 || fail "passing check run failed"
+grep -Fq '=== Check passed' "$TMP/out-check" || fail "check pass banner missing"
+grep -Fq 'all-good' "$TMP/out-check" || fail "check output missing"
+if grep -Fq '  check-artifact.txt' "$TMP/out-check"; then fail "check artifact reported as worker change"; fi
+rm -f "$TMP/repo/check-artifact.txt"
+rc=0; OPENCODE_WORKER_CHECK='echo broken; exit 1' run_worker "task" > "$TMP/out-check" 2>&1 || rc=$?
+[[ $rc -eq 6 ]] || fail "failing check should exit 6, got $rc"
+grep -Fq 'Check FAILED (exit 1)' "$TMP/out-check" || fail "check failure banner missing"
+rc=0; OPENCODE_WORKER_MODE=read OPENCODE_WORKER_CHECK='exit 1' run_worker "task" > /dev/null 2>&1 || rc=$?
+[[ $rc -eq 0 ]] || fail "read mode should ignore the check, got $rc"
+
 echo "PASS: worker behaves as expected."

@@ -50,6 +50,7 @@ The worker is validated with OpenCode `2.0.31` and still supports OpenCode 1.x. 
 - `skills/delegate-to-opencode/SKILL.md`: Claude Code skill definition, including the Opus-only delegation rule and mandatory main-session review.
 - `skills/delegate-to-opencode/scripts/claude-opencode-worker`: wrapper that launches OpenCode with a timeout, deny rules and a report of what changed.
 - `skills/delegate-to-opencode/references/review-checklist.md`: what the main session checks in every delegated diff.
+- `skills/delegate-to-opencode/references/worker.md`: exit codes, report, read mode, session resume and other worker details, loaded only when needed.
 - `install.sh`: installs the skill folder into `~/.claude/skills/`.
 - `uninstall.sh`: removes the installed files while creating a timestamped backup first.
 - `tests/test-install.sh`: verifies the installed files match the repository and checks basic metadata.
@@ -77,6 +78,7 @@ Both place:
 ~/.claude/skills/delegate-to-opencode/SKILL.md
 ~/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker
 ~/.claude/skills/delegate-to-opencode/references/review-checklist.md
+~/.claude/skills/delegate-to-opencode/references/worker.md
 ```
 
 `install.sh` creates a timestamped backup if a target file already exists, and removes the `~/.local/bin/claude-opencode-worker` left by versions before 1.3.0 (after backing it up).
@@ -159,6 +161,7 @@ OpenCode then runs its `plan` agent with file edits denied and bash limited to c
 | 3 | OpenCode finished, but a permission was denied or auto-rejected; the task may be incomplete |
 | 4 | A read-only run changed the working tree |
 | 5 | A file changed inside a directory shared through `OPENCODE_WORKER_READ_DIRS` |
+| 6 | The check command in `OPENCODE_WORKER_CHECK` failed |
 | 124 | Timeout; changes may be partial |
 | 127 | `opencode` not found |
 
@@ -172,6 +175,26 @@ The point of delegating is to make the Claude session cost less, and Claude pays
 - the path of the full log.
 
 A typical edit run now reports in under 1000 characters, where the old streamed transcript ran to tens of thousands. `OPENCODE_WORKER_VERBOSE=1` adds the transcript back, for debugging the worker.
+
+### One turn instead of three
+
+Every extra turn re-reads the whole Claude context, which is what made delegating cost more than writing the code. The worker therefore also does the two steps Claude used to take separate turns for:
+
+- **Inline diff.** When the whole diff, new files included, is at most `OPENCODE_WORKER_DIFF_LINES` lines (default 150; `0` disables it), it is printed after `Worker changes`.
+- **Check command.** `OPENCODE_WORKER_CHECK='python3 -m unittest'` runs after OpenCode finishes, in the project directory, with `OPENCODE_WORKER_CHECK_TIMEOUT` seconds (default 300). The worker prints whether it passed and the tail of its output, and exits 6 when it failed. It runs after the change report, so files it creates are not counted as OpenCode's changes. It is skipped in read mode and after a timeout.
+
+The skill keeps only the main flow in `SKILL.md` (about 4.8 KB) and moves exit codes, read mode, session resume and the other details to `references/worker.md`, read only when needed, because the skill text is re-read on every turn after it loads.
+
+### Measured cost
+
+Fresh `claude -p` Opus 5.5 sessions on the same task, OpenCode 2.0.31 with `muse-spark-1.3-contributor-free`:
+
+| Task | Opus alone | Delegated | Quality |
+|---|---|---|---|
+| Write a unittest suite for a 10-function module | $0.42 to $0.45 (4 runs) | $0.31 (2 runs), about 30% less | Opus: 68 to 91 tests, 10/10 planted bugs caught. Delegated: 49 to 56 tests, 8 to 9/10 |
+| Replace `print` with `logging` in 12 modules | $0.35 to $0.38 (4 runs) | $0.35 (2 runs) | Both correct; Opus solved it with a short script, so there was nothing to save |
+
+About $0.25 to $0.30 of each session is the fixed start-up context (system prompt, skill list, `CLAUDE.md`), which delegating cannot reduce. In these runs Opus did not pick the skill on its own; it delegated when the prompt asked for the skill.
 
 ### Files outside the project
 

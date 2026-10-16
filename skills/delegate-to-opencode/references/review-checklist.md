@@ -50,7 +50,7 @@ and build commands and read the output.
 
 - Everything holds: report to the user what changed and what you verified.
 - Something needs fixing: send only the correction to the same OpenCode
-  session (see "Fixing after review" in SKILL.md) and review again, or fix it
+  session (see "Fixing after review" in references/worker.md) and review again, or fix it
   yourself if it is small.
 - The fix needs a design decision or goes beyond the task: stop and ask the
   user.

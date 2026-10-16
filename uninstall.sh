@@ -5,6 +5,7 @@ set -euo pipefail
 TARGET_SKILL="$HOME/.claude/skills/delegate-to-opencode/SKILL.md"
 TARGET_WORKER="$HOME/.claude/skills/delegate-to-opencode/scripts/claude-opencode-worker"
 TARGET_CHECKLIST="$HOME/.claude/skills/delegate-to-opencode/references/review-checklist.md"
+TARGET_REFERENCE="$HOME/.claude/skills/delegate-to-opencode/references/worker.md"
 LEGACY_WORKER="$HOME/.local/bin/claude-opencode-worker"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
@@ -23,6 +24,7 @@ backup_if_exists() {
 backup_if_exists "$TARGET_SKILL"
 backup_if_exists "$TARGET_WORKER"
 backup_if_exists "$TARGET_CHECKLIST"
+backup_if_exists "$TARGET_REFERENCE"
 backup_if_exists "$LEGACY_WORKER"
 
 # Only removes the skill directories when empty, so user-added files survive.
