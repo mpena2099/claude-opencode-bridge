@@ -21,7 +21,7 @@ git -C "$TMP/repo" add init.txt
 cat > "$TMP/bin/opencode" <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--version" ]]; then
-    echo "0.0.0-stub"
+    echo "${STUB_VERSION:-0.0.0-stub}"
     exit 0
 fi
 if [[ "${1:-}" == "models" ]]; then
@@ -46,6 +46,7 @@ for arg in "$@"; do
     prev="$arg"
 done
 printf '%s\n' "$@" > "$STUB_OUT/args"
+pwd > "$STUB_OUT/cwd"
 printf '%s' "${OPENCODE_CONFIG_CONTENT:-}" > "$STUB_OUT/config"
 if [[ -n "${STUB_PRINT:-}" ]]; then
     echo "$STUB_PRINT"
@@ -86,6 +87,17 @@ run_worker > /dev/null <<< "$LITERAL" || fail "stdin task run failed"
 grep -Fq "$LITERAL" "$TMP/out/args" || fail "stdin task was not passed literally"
 grep -Fxq -- '--agent' "$TMP/out/args" || fail "--agent build missing"
 grep -Fxq -- "$TMP/repo" "$TMP/out/args" || fail "--dir project path missing"
+if grep -Fxq -- '--standalone' "$TMP/out/args"; then
+    fail "OpenCode 1 should not get --standalone"
+fi
+
+# OpenCode 2: --standalone so the deny config applies, no --dir, run from the project.
+STUB_VERSION='opencode v2.0.31' run_worker "task" > /dev/null || fail "OpenCode 2 run failed"
+grep -Fxq -- '--standalone' "$TMP/out/args" || fail "OpenCode 2 should get --standalone"
+if grep -Fxq -- '--dir' "$TMP/out/args"; then
+    fail "OpenCode 2 should not get --dir"
+fi
+[[ "$(cat "$TMP/out/cwd")" == "$TMP/repo" ]] || fail "OpenCode 2 should run from the project directory"
 
 # Task as arguments still works.
 run_worker "Create" "file.txt" > /dev/null || fail "argument task run failed"
@@ -333,6 +345,13 @@ EOF
 rc=0; STUB_SESSIONS='[]' STUB_EVENTS="$TMP/events-denied.jsonl" run_worker "task" > /dev/null 2> "$TMP/err-denied" || rc=$?
 [[ $rc -eq 3 ]] || fail "denied tool call in events should exit 3, got $rc"
 grep -Fq '/outside/doc.md' "$TMP/err-denied" || fail "denied tool target missing"
+
+# OpenCode 2 wording for deny hits and auto-rejects also exits 3.
+for err in 'Permission denied: shell' 'This non-interactive run cannot ask the user for permission, so the request was rejected.'; do
+    printf '{"type":"tool_use","sessionID":"ses_D","part":{"type":"tool","tool":"shell","state":{"status":"error","input":{"command":"touch x"},"error":"%s"}}}\n' "$err" > "$TMP/events-denied2.jsonl"
+    rc=0; STUB_SESSIONS='[]' STUB_EVENTS="$TMP/events-denied2.jsonl" run_worker "task" > /dev/null 2>&1 || rc=$?
+    [[ $rc -eq 3 ]] || fail "OpenCode 2 error '$err' should exit 3, got $rc"
+done
 
 # Read dirs: allowed in the config, named in the prompt, and edits there exit 5.
 mkdir -p "$TMP/docs"

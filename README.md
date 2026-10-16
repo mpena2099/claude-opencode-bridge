@@ -43,7 +43,7 @@ Main Opus session reviews diff + tests
       accepted
 ```
 
-For the validated setup, OpenCode reported version `1.18.34` and used `muse-spark-1.3-contributor-free` for the delegated test.
+The worker is validated with OpenCode `2.0.31` and still supports OpenCode 1.x. Delegated tests used `muse-spark-1.3-contributor-free`.
 
 ## Files
 
@@ -84,7 +84,7 @@ Both place:
 ## Requirements
 
 - Claude Code with support for Skills.
-- OpenCode installed and available as `opencode` in `PATH`.
+- OpenCode 1.x or 2.x installed and available as `opencode` in `PATH`.
 - Working OpenCode `build` and `plan` agents (`plan` is used by read-only runs).
 - The project being changed must be a git repository. The worker refuses to run elsewhere, because without git there is no diff to review.
 
@@ -256,11 +256,13 @@ This is a guardrail, not a sandbox. A pattern-based rule does not catch forms li
 
 ### OpenCode non-interactive behavior
 
-Verified with OpenCode 1.18.35:
+Verified with OpenCode 2.0.31 (and 1.18.35 where noted):
 
+- OpenCode 2 runs `opencode run` through a shared background service by default. That service does not see the `OPENCODE_CONFIG_CONTENT` of the calling process, so the worker's deny rules would silently not apply. The worker passes `--standalone` on OpenCode 2, which starts a private server that inherits the environment, and runs from the project directory because OpenCode 2 dropped `--dir`. On OpenCode 1 it keeps `--dir`.
 - Any permission that resolves to `ask` is auto-rejected in `opencode run` (`permission requested: ...; auto-rejecting`). The run does not hang waiting for approval.
-- A command matching a `deny` rule fails with `The user has specified a rule which prevents you from using this specific tool call`.
-- In both cases OpenCode still exits with code 0. The worker looks for both messages in the output and exits with code 3 instead.
+- A command matching a `deny` rule fails with `Permission denied: <tool>` on OpenCode 2 and `The user has specified a rule which prevents you from using this specific tool call` on OpenCode 1.
+- In both cases OpenCode still exits with code 0. The worker looks for these messages and exits with code 3 instead.
+- OpenCode 2 renamed the `bash` tool to `shell`; the `bash` permission key still controls it.
 - OpenCode reads the project's `CLAUDE.md`, but not Claude Code's memory directory, so the skill asks Claude to copy relevant project rules into the task.
 - `--auto` would approve every permission that is not explicitly denied. The worker does not use it.
 

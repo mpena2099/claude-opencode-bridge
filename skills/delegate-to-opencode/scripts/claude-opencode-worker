@@ -286,9 +286,19 @@ if [[ -n "$PREEXISTING" ]]; then
     [[ $PRE_COUNT -gt 15 ]] && echo "  ... and $((PRE_COUNT - 15)) more"
 fi
 
-ARGS=(
-    run
-    --dir "$PROJECT_DIR"
+# OpenCode 2 runs through a shared background service that never sees this
+# process's OPENCODE_CONFIG_CONTENT, so the deny rules above would silently not
+# apply. --standalone starts a private server that inherits the environment.
+# OpenCode 2 also dropped --dir and uses the current directory instead.
+OPENCODE_VERSION="$(opencode --version 2>/dev/null || true)"
+OPENCODE_MAJOR="$(sed -E 's/^[^0-9]*([0-9]+).*/\1/' <<< "$OPENCODE_VERSION")"
+ARGS=(run)
+if [[ "$OPENCODE_MAJOR" =~ ^[0-9]+$ && $OPENCODE_MAJOR -ge 2 ]]; then
+    ARGS+=(--standalone)
+else
+    ARGS+=(--dir "$PROJECT_DIR")
+fi
+ARGS+=(
     --agent "$AGENT"
     --format json
 )
@@ -316,6 +326,7 @@ READ_DIRS_MARKER="$SUMMARY_DIR/marker"
 touch "$READ_DIRS_MARKER"
 
 rc=0
+cd "$PROJECT_DIR"
 if command -v timeout >/dev/null 2>&1; then
     timeout -k 15 "$TIMEOUT" opencode "${ARGS[@]}" "$PROMPT" > "$LOG" 2> "$ERR_LOG" || rc=$?
 else
@@ -385,7 +396,9 @@ for i, ev in enumerate(events):
         if state.get("status") == "error":
             err = str(state.get("error", ""))
             line = f"{name} {tool_target(state)}: {short(err)}"
-            if "rule which prevents" in err or "auto-reject" in err:
+            # OpenCode 1 and 2 word deny and auto-reject errors differently.
+            if any(m in err for m in ("rule which prevents", "auto-reject",
+                                      "Permission denied:", "cannot ask the user for permission")):
                 denied.append(line)
             else:
                 failed.append(line)
@@ -498,7 +511,8 @@ if [[ $rc -eq 124 ]]; then
 fi
 
 # "auto-rejecting" comes from permissions set to ask; the other message comes
-# from the deny rules above. Both leave the task possibly incomplete.
+# from the deny rules above (OpenCode 1; OpenCode 2 reports deny hits only in
+# the JSON events, handled in summarize_events). Both leave the task possibly incomplete.
 # The deny message is matched only at the start of a line (after colour codes),
 # so file content that quotes it, e.g. in a printed diff, is not a hit.
 COLOUR=$'(\033\\[[0-9;]*m)*'

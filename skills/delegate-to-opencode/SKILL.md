@@ -20,7 +20,7 @@ compatibility: >-
   used to report the model and find the OpenCode session, and the worker
   still runs without it.
 metadata:
-  version: 1.8.0
+  version: 1.9.0
 ---
 
 # Delegate to OpenCode
