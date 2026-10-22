@@ -502,7 +502,7 @@ fi
 # Printing a small diff here saves the caller a separate turn to read it, and
 # every turn re-reads the caller's whole context. Larger diffs are left to a
 # targeted read.
-DIFF_LINES="${OPENCODE_WORKER_DIFF_LINES:-150}"
+DIFF_LINES="${OPENCODE_WORKER_DIFF_LINES:-60}"
 if [[ "$MODE" == edit && "$DIFF_LINES" =~ ^[0-9]+$ && $DIFF_LINES -gt 0 ]]; then
     FULL_DIFF="$(
         if [[ -n "$BASELINE" ]]; then

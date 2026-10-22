@@ -183,7 +183,7 @@ A typical edit run now reports in under 1000 characters, where the old streamed 
 
 Every extra turn re-reads the whole Claude context, which is what made delegating cost more than writing the code. The worker therefore also does the two steps Claude used to take separate turns for:
 
-- **Inline diff.** When the whole diff, new files included, is at most `OPENCODE_WORKER_DIFF_LINES` lines (default 150; `0` disables it), it is printed after `Worker changes`.
+- **Inline diff.** When the whole diff, new files included, is at most `OPENCODE_WORKER_DIFF_LINES` lines (default 60; `0` disables it), it is printed after `Worker changes`.
 - **Check command.** `OPENCODE_WORKER_CHECK='python3 -m unittest'` runs after OpenCode finishes, in the project directory, with `OPENCODE_WORKER_CHECK_TIMEOUT` seconds (default 300). The worker prints whether it passed and the tail of its output, and exits 6 when it failed. It runs after the change report, so files it creates are not counted as OpenCode's changes. It is skipped in read mode and after a timeout.
 
 The skill keeps only the main flow in `SKILL.md` (about 4.8 KB) and moves exit codes, read mode, session resume and the other details to `references/worker.md`, read only when needed, because the skill text is re-read on every turn after it loads.

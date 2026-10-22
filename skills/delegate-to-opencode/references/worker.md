@@ -32,7 +32,7 @@ and denied tool calls, OpenCode's token usage, the path of the full log, a
 already in the working tree: a diffstat, a `git diff <baseline>` command, new
 untracked files, and already-untracked files OpenCode changed (which
 `git diff` does not show). When the whole diff, new files included, is at most
-`OPENCODE_WORKER_DIFF_LINES` lines (default 150; `0` disables it), it is
+`OPENCODE_WORKER_DIFF_LINES` lines (default 60; `0` disables it), it is
 printed inline.
 
 The check in `OPENCODE_WORKER_CHECK` runs last, in the project directory, with

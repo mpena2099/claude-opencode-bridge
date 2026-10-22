@@ -1,6 +1,6 @@
 Claude Code → OpenCode Delegation Bridge
 
-Project version: 1.11.0
+Project version: 1.12.0
 Validated Claude Code version: 2.1.299
 Validated OpenCode version: 2.0.31 (1.x still supported)
 Validated delegated model: muse-spark-1.3-contributor-free

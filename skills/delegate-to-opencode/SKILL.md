@@ -16,7 +16,7 @@ compatibility: >-
   Built for Claude Code. Requires the opencode CLI, git and bash; python3 is
   used to summarize OpenCode's output, and the worker still runs without it.
 metadata:
-  version: 1.11.0
+  version: 1.12.0
 ---
 
 # Delegate to OpenCode
@@ -30,6 +30,17 @@ only when OpenCode writes much more than the delegation costs you:
   skim of the diff can. A delegated test suite costs about 30% fewer Opus
   tokens than writing it, but tends to be smaller unless `Done when` names
   the cases that matter.
+- **Also worth it: investigation with long output.** Counting rows, joining
+  catalogs, probing an API, grepping logs or tracing where something is used:
+  if you would read pages of output to get a one-line answer, delegate it and
+  ask only for the conclusion and the numbers. Every line of output you read
+  yourself is re-read on every later turn. Questions about the code alone go
+  in read mode; anything that must run a script goes in edit mode, with the
+  script in a scratch folder inside the project and `Done when` naming the
+  numbers to report.
+- **Batch small tasks.** Two or three independent tasks that are each too
+  small to delegate alone can share one run: list them as numbered goals in
+  one `TASK`, with one check that covers all of them.
 - **Not worth it either:** a change you can make with a short script or a
   `sed` over many files. Writing the script costs less than the delegation.
 - **Not worth it:** small changes, code you will read line by line anyway
@@ -69,16 +80,17 @@ roughly as much as writing a few hundred tokens of code.
    conversation.
 
 3. **Review from the report.** The worker prints OpenCode's answer, the
-   diffstat, the diff itself when it is short (150 lines or less), and the
+   diffstat, the diff itself when it is short (60 lines or less), and the
    result of your check, which it runs after OpenCode finishes. Exit code `0`
    means OpenCode finished and the check passed; anything else, see
    [references/worker.md](references/worker.md).
    - Check passed and the diff is printed: skim it for the patterns in
      [references/review-checklist.md](references/review-checklist.md) and
      answer. No further reads are needed.
-   - Diff not printed: run one targeted read (`git diff <baseline> -- <file>`
-     on the files that carry logic, or `grep` for risky patterns), not a full
-     read of every file.
+   - Diff not printed: if the check passed and the task was tests or
+     boilerplate, the diffstat is enough. Otherwise run one targeted read
+     (`git diff <baseline> -- <file>` on the files that carry logic, or `grep`
+     for risky patterns), not a full read of every file.
    - Something is wrong: fix it yourself if small; otherwise resume the same
      OpenCode session with only the correction (see references/worker.md).
 
