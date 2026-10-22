@@ -16,7 +16,7 @@ compatibility: >-
   Built for Claude Code. Requires the opencode CLI, git and bash; python3 is
   used to summarize OpenCode's output, and the worker still runs without it.
 metadata:
-  version: 1.12.0
+  version: 1.13.0
 ---
 
 # Delegate to OpenCode
@@ -38,6 +38,9 @@ only when OpenCode writes much more than the delegation costs you:
   in read mode; anything that must run a script goes in edit mode, with the
   script in a scratch folder inside the project and `Done when` naming the
   numbers to report.
+- **Also worth it: a second opinion.** After a large change of your own, a
+  read-mode run can critique the diff or plan and return a short list of
+  suspected bugs (see references/worker.md).
 - **Batch small tasks.** Two or three independent tasks that are each too
   small to delegate alone can share one run: list them as numbered goals in
   one `TASK`, with one check that covers all of them.
@@ -71,8 +74,14 @@ roughly as much as writing a few hundred tokens of code.
    Size: <a cap, e.g. "at most 300 lines">
    Done when: <observable result; for tests, the cases each function must
      cover: boundaries, empty input, every error path>
+   Stop if: <when to stop and report instead of forcing it, e.g. "the check
+     can only pass by changing a file in Do not touch">
    TASK
    ```
+
+   Pair every hard rule with a `Stop if`. Without one, a worker that cannot
+   meet a rule tends to game it (weakens the test, skips the case); with one,
+   it stops and says why, which counts as a good run.
 
    Keep the task short: point at files instead of pasting them, and name only
    facts OpenCode cannot find (columns, API shapes, exact strings). OpenCode
@@ -93,6 +102,7 @@ roughly as much as writing a few hundred tokens of code.
      for risky patterns), not a full read of every file.
    - Something is wrong: fix it yourself if small; otherwise resume the same
      OpenCode session with only the correction (see references/worker.md).
+     After two correction rounds that still fail, finish it yourself.
 
 Do not trust OpenCode's claims; trust the check output and the diff. The
 review is yours, not OpenCode's.
@@ -110,7 +120,9 @@ The worker blocks, for delegated runs only: destructive git commands (commit,
 push, reset, clean, checkout, switch, restore, stash, rebase, merge),
 `rm -rf`, file access outside the project, and the user's extra deny
 patterns. Do not ask OpenCode to do any of these; do that step yourself after
-reviewing. Do not commit unless the user asked. Do not reset, clean, checkout,
+reviewing. Before you edit or commit, check that no worker is still running
+(`pgrep -fa claude-opencode-worker`), for example one started in the
+background; wait for it or stop it first. Do not commit unless the user asked. Do not reset, clean, checkout,
 or discard existing user changes.
 
 For read-only questions, long tasks, sharing files outside the repository, and

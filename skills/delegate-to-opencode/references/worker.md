@@ -58,6 +58,10 @@ TASK
 The resumed run keeps the session's model, and its report shows only that
 round's changes. Small fixes are cheaper to make yourself.
 
+Stop after two correction rounds that still fail review or the check: finish
+the task yourself from where OpenCode left it. A third round rarely converges
+and costs more than the remaining work.
+
 ## Read-only analysis
 
 For questions about the code, run with `OPENCODE_WORKER_MODE=read`. OpenCode
@@ -70,6 +74,15 @@ The answer is a lead, not a fact: open the files and lines it cites for every
 point that matters before acting on it. Exit `3` in read mode often means
 OpenCode tried a command outside the list and then answered another way; read
 the answer before treating it as incomplete.
+
+### Second opinion
+
+Read mode also reviews your own work cheaply, because the answer is short: ask
+OpenCode to critique a plan file or `git diff <base>` and list concrete bugs,
+missed cases and contradictions with the project's rules, each with file and
+line. Use it after a large change of yours, before telling the user it is
+done. Treat each point as a lead and verify it; drop the ones that do not
+hold.
 
 ## Long tasks
 
