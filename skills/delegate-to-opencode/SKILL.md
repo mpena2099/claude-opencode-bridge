@@ -79,6 +79,12 @@ roughly as much as writing a few hundred tokens of code.
    TASK
    ```
 
+   The worker's own limit is 570 s, to fit the foreground Bash limit. A task
+   that writes code in more than two files, or adds tests and docs as well,
+   usually takes longer: run it with `run_in_background: true` and
+   `OPENCODE_WORKER_TIMEOUT=1500` before the command, then wait for the
+   completion notice instead of polling.
+
    Pair every hard rule with a `Stop if`. Without one, a worker that cannot
    meet a rule tends to game it (weakens the test, skips the case); with one,
    it stops and says why, which counts as a good run.
