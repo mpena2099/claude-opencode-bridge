@@ -1,12 +1,13 @@
 ---
 name: delegate-to-opencode
 description: >
-  Use when the current main model is Opus and you are about to write a large
+  Use when the current main model is Opus or Fable (any model priced above
+  Sonnet) and you are about to write a large
   amount of straightforward code yourself: a test suite for existing code,
   boilerplate that follows an existing file, new code across many files, or
   read-only analysis that means reading many files. OpenCode
   writes it on a free model and you review the result, which costs far fewer
-  Opus tokens than writing it. After OpenCode finishes, the main Opus session
+  main-model tokens than writing it. After OpenCode finishes, the main session
   must review the resulting changes before considering the work complete. Do
   not use when the current model is Sonnet. Do not delegate small edits,
   architectural decisions, ambiguous requirements, security-sensitive work, or
@@ -21,13 +22,13 @@ metadata:
 
 # Delegate to OpenCode
 
-The point is to spend fewer Opus tokens. You pay for what you write and for
+The point is to spend fewer tokens of the main model (Opus or Fable). You pay for what you write and for
 every turn, because each turn re-reads your whole context. Delegating pays
 only when OpenCode writes much more than the delegation costs you:
 
 - **Worth it:** you would otherwise write a lot of new code yourself (roughly
   150+ lines), and a command can check it (tests pass, build succeeds) or a
-  skim of the diff can. A delegated test suite costs about 30% fewer Opus
+  skim of the diff can. A delegated test suite costs about 30% fewer main-model
   tokens than writing it, but tends to be smaller unless `Done when` names
   the cases that matter.
 - **Also worth it: investigation with long output.** Counting rows, joining
