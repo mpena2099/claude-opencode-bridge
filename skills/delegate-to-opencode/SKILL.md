@@ -113,6 +113,25 @@ roughly as much as writing a few hundred tokens of code.
 Do not trust OpenCode's claims; trust the check output and the diff. The
 review is yours, not OpenCode's.
 
+## When OpenCode fails: Haiku before Sonnet
+
+If OpenCode stops early, makes no changes, or fails twice on the same task,
+hand the task to a subagent instead of writing it yourself, in this order:
+
+1. **Haiku** (Agent with `model: haiku`) for well-specified work: doc or page
+   rewrites with a clear outline, mechanical edits, tests that follow an
+   existing pattern, extracting numbers from logs or data.
+2. **Sonnet** (Agent with `model: sonnet`) only when the task needs judgment
+   Haiku tends to get wrong: logic fixes across files, subtle correctness,
+   debugging.
+
+Give the subagent the same Goal / Files / Do not touch / Done when / Stop if
+as the OpenCode task, plus the check command, and ask for a short report.
+Say in one line which model got the task and why. Review its diff as you
+would OpenCode's. A file outside the checkout that OpenCode must read is
+denied by the worker: copy it into the checkout first (untracked, removed
+before committing) instead of switching tools.
+
 ## Model
 
 Do not pass a model. OpenCode uses its own default, which the user controls.
